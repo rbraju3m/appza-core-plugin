@@ -12,6 +12,7 @@ global $wpdb;
 
 $tables = array(
 	$wpdb->prefix . 'appza_catalog_snapshot',
+	$wpdb->prefix . 'appza_catalog_meta',
 );
 
 foreach ( $tables as $table ) {
