@@ -8,6 +8,8 @@ if ( ! defined( 'WPINC' ) ) {
 	die;
 }
 
+use AppzaCore\Plugin\Admin\AdminController;
+use AppzaCore\Plugin\Admin\AdminMenu;
 use AppzaCore\Plugin\Rest\RestRoutes;
 
 class Appza_Core_Plugin {
@@ -18,6 +20,7 @@ class Appza_Core_Plugin {
 		$this->loader = new Appza_Core_Loader();
 		$this->set_locale();
 		$this->define_rest_hooks();
+		$this->define_admin_hooks();
 	}
 
 	protected function set_locale() {
@@ -28,6 +31,15 @@ class Appza_Core_Plugin {
 	protected function define_rest_hooks() {
 		$rest = new RestRoutes();
 		$this->loader->add_action( 'rest_api_init', $rest, 'register_routes' );
+	}
+
+	protected function define_admin_hooks() {
+		$menu       = new AdminMenu();
+		$controller = new AdminController();
+
+		$this->loader->add_action( 'admin_menu', $menu, 'register_menu' );
+		$this->loader->add_action( 'admin_notices', $controller, 'maybe_render_notice' );
+		$this->loader->add_action( 'admin_post_' . AdminController::PULL_ACTION, $controller, 'handle_pull' );
 	}
 
 	public function run() {
