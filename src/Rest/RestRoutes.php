@@ -16,7 +16,8 @@ if ( ! defined( 'WPINC' ) ) {
 class RestRoutes {
 
 	public function register_routes() {
-		$bootstrap = new BootstrapController();
+		$bootstrap      = new BootstrapController();
+		$customizations = new CustomizationsController();
 
 		register_rest_route(
 			APPZA_CORE_REST_NAMESPACE,
@@ -32,6 +33,40 @@ class RestRoutes {
 						'sanitize_callback' => 'sanitize_title',
 					),
 				),
+			)
+		);
+
+		register_rest_route(
+			APPZA_CORE_REST_NAMESPACE,
+			'/customizations',
+			array(
+				array(
+					'methods'             => \WP_REST_Server::READABLE,
+					'callback'            => array( $customizations, 'list' ),
+					'permission_callback' => array( $customizations, 'permission_check' ),
+				),
+				array(
+					'methods'             => \WP_REST_Server::CREATABLE,
+					'callback'            => array( $customizations, 'upsert' ),
+					'permission_callback' => array( $customizations, 'permission_check' ),
+					'args'                => array(
+						'scope'                 => array( 'required' => true, 'type' => 'string' ),
+						'target_slug'           => array( 'type' => 'string' ),
+						'target_slug_composite' => array( 'type' => 'string' ),
+						'target_column'         => array( 'required' => true, 'type' => 'string' ),
+						'override_value'        => array( 'required' => true ),
+					),
+				),
+			)
+		);
+
+		register_rest_route(
+			APPZA_CORE_REST_NAMESPACE,
+			'/customizations/(?P<id>\d+)',
+			array(
+				'methods'             => \WP_REST_Server::DELETABLE,
+				'callback'            => array( $customizations, 'delete' ),
+				'permission_callback' => array( $customizations, 'permission_check' ),
 			)
 		);
 	}

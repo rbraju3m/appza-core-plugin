@@ -76,8 +76,13 @@ class AssetLoader {
 						// Apache rewrites are broken can define
 						// APPZA_CORE_FORCE_QUERY_REST so we hand the query
 						// form regardless of permalink settings.
-						'bootstrap' => esc_url_raw( $this->endpoint_url( 'bootstrap' ) ),
+						'bootstrap'      => esc_url_raw( $this->endpoint_url( 'bootstrap' ) ),
+						'customizations' => esc_url_raw( $this->endpoint_url( 'customizations' ) ),
 					),
+					// Cookie-auth'd REST calls need this header (X-WP-Nonce).
+					// The mutating customizations endpoints check it via WP's
+					// rest_cookie_check_errors filter.
+					'restNonce'       => wp_create_nonce( 'wp_rest' ),
 					'defaultTemplate' => 'fluent-community-default',
 				)
 			);
