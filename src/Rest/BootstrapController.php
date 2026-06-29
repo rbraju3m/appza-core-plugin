@@ -55,7 +55,12 @@ class BootstrapController {
 			'catalog_snapshot_version' => $snapshot ? (int) $snapshot['catalog_snapshot_version'] : 0,
 			'customizations_version'   => (int) $meta['customizations_version'],
 			'catalog'                  => $catalog,
-			'customizations'           => array(),
+			// Always a JSON object (possibly empty {}), never an array — the
+			// runtime customizations read is a scope -> target -> column ->
+			// override map. PHP's empty array() serializes to [] so we cast
+			// to stdClass to force object encoding. Phase 1B.5+ replaces
+			// this empty stub with the real wp_appza_customizations read.
+			'customizations'           => new \stdClass(),
 			'runtime_config'           => $this->runtime_config( $catalog ),
 		);
 
