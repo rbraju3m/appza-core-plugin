@@ -47,7 +47,7 @@ class BootstrapController {
 		$meta     = $this->meta->get();
 
 		$catalog = $snapshot && is_array( $snapshot['snapshot_blob'] )
-			? $snapshot['snapshot_blob']
+			? $this->normalize_catalog_shape( $snapshot['snapshot_blob'] )
 			: $this->empty_catalog( $template_slug );
 
 		$response = array(
@@ -65,6 +65,38 @@ class BootstrapController {
 		);
 
 		return rest_ensure_response( $response );
+	}
+
+	/**
+	 * Restore object-shape for known leaf-bag fields after the repository's
+	 * json_decode($blob, true) collapsed `{}` to PHP empty array. Without
+	 * this, the round-trip Core -> WP-cache -> bootstrap response converts
+	 * object-shaped fields (tokens, screen_tokens) into JSON arrays,
+	 * breaking the wire contract documented in DC#09 / DC#10.
+	 */
+	protected function normalize_catalog_shape( array $catalog ) {
+		if ( isset( $catalog['template'] ) && is_array( $catalog['template'] ) ) {
+			$catalog['template']['tokens'] = $this->normalize_object( $catalog['template']['tokens'] ?? null );
+		}
+		if ( ! empty( $catalog['template_screens'] ) && is_array( $catalog['template_screens'] ) ) {
+			foreach ( $catalog['template_screens'] as &$screen ) {
+				if ( is_array( $screen ) ) {
+					$screen['screen_tokens'] = $this->normalize_object( $screen['screen_tokens'] ?? null, true );
+				}
+			}
+			unset( $screen );
+		}
+		return $catalog;
+	}
+
+	protected function normalize_object( $value, $allow_null = false ) {
+		if ( null === $value ) {
+			return $allow_null ? null : new \stdClass();
+		}
+		if ( is_array( $value ) && empty( $value ) ) {
+			return new \stdClass();
+		}
+		return $value;
 	}
 
 	protected function empty_catalog( $template_slug ) {
