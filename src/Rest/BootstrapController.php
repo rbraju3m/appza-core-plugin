@@ -21,6 +21,7 @@ namespace AppzaCore\Plugin\Rest;
 
 use AppzaCore\Plugin\Repository\CatalogMetaRepository;
 use AppzaCore\Plugin\Repository\CatalogSnapshotRepository;
+use AppzaCore\Plugin\Repository\CustomizationRepository;
 
 if ( ! defined( 'WPINC' ) ) {
 	die;
@@ -30,10 +31,16 @@ class BootstrapController {
 
 	protected $snapshots;
 	protected $meta;
+	protected $customizations;
 
-	public function __construct( CatalogSnapshotRepository $snapshots = null, CatalogMetaRepository $meta = null ) {
-		$this->snapshots = $snapshots ?: new CatalogSnapshotRepository();
-		$this->meta      = $meta ?: new CatalogMetaRepository();
+	public function __construct(
+		CatalogSnapshotRepository $snapshots = null,
+		CatalogMetaRepository $meta = null,
+		CustomizationRepository $customizations = null
+	) {
+		$this->snapshots      = $snapshots ?: new CatalogSnapshotRepository();
+		$this->meta           = $meta ?: new CatalogMetaRepository();
+		$this->customizations = $customizations ?: new CustomizationRepository();
 	}
 
 	public function handle( \WP_REST_Request $request ) {
@@ -50,17 +57,20 @@ class BootstrapController {
 			? $this->normalize_catalog_shape( $snapshot['snapshot_blob'] )
 			: $this->empty_catalog( $template_slug );
 
+		$customizations_tree = $this->customizations->all_as_tree();
+
 		$response = array(
 			'schema_version'           => APPZA_CORE_CONTRACTS_VERSION,
 			'catalog_snapshot_version' => $snapshot ? (int) $snapshot['catalog_snapshot_version'] : 0,
 			'customizations_version'   => (int) $meta['customizations_version'],
 			'catalog'                  => $catalog,
-			// Always a JSON object (possibly empty {}), never an array — the
-			// runtime customizations read is a scope -> target -> column ->
-			// override map. PHP's empty array() serializes to [] so we cast
-			// to stdClass to force object encoding. Phase 1B.5+ replaces
-			// this empty stub with the real wp_appza_customizations read.
-			'customizations'           => new \stdClass(),
+			// Real customizations payload — `scope -> target_key -> column ->
+			// override_value` nested object. Empty when no overrides exist
+			// (still {}, never []). Phase 1B.5a wires the read path; the
+			// admin UI to edit these ships in Phase 1B.5b.
+			'customizations'           => empty( (array) $customizations_tree )
+				? new \stdClass()
+				: $customizations_tree,
 			'runtime_config'           => $this->runtime_config( $catalog ),
 		);
 

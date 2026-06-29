@@ -13,16 +13,19 @@ if ( ! defined( 'WPINC' ) ) {
 
 class SchemaManager {
 
-	const DB_VERSION = '1';
+	// Bumped to 2 with the wp_appza_customizations addition (Phase 1B.5a).
+	const DB_VERSION = '2';
 
 	public static function install() {
 		CatalogSnapshotSchema::install();
 		CatalogMetaSchema::install();
+		CustomizationSchema::install();
 		update_option( 'appza_core_db_version', self::DB_VERSION, false );
 	}
 
 	public static function drop_all() {
 		CatalogSnapshotSchema::drop();
 		CatalogMetaSchema::drop();
+		CustomizationSchema::drop();
 	}
 }
