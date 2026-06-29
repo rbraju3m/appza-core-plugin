@@ -10,6 +10,7 @@ if ( ! defined( 'WPINC' ) ) {
 
 use AppzaCore\Plugin\Admin\AdminController;
 use AppzaCore\Plugin\Admin\AdminMenu;
+use AppzaCore\Plugin\Admin\AssetLoader;
 use AppzaCore\Plugin\Rest\RestRoutes;
 
 class Appza_Core_Plugin {
@@ -36,10 +37,13 @@ class Appza_Core_Plugin {
 	protected function define_admin_hooks() {
 		$menu       = new AdminMenu();
 		$controller = new AdminController();
+		$assets     = new AssetLoader();
 
 		$this->loader->add_action( 'admin_menu', $menu, 'register_menu' );
 		$this->loader->add_action( 'admin_notices', $controller, 'maybe_render_notice' );
 		$this->loader->add_action( 'admin_post_' . AdminController::PULL_ACTION, $controller, 'handle_pull' );
+		$this->loader->add_action( 'admin_enqueue_scripts', $assets, 'enqueue' );
+		$this->loader->add_filter( 'script_loader_tag', $assets, 'add_module_type', 10, 2 );
 	}
 
 	public function run() {
