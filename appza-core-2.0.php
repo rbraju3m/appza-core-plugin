@@ -1,7 +1,7 @@
 <?php
 /**
  * Plugin Name:       APPZA Core 2.0
- * Plugin URI:        https://github.com/nmkhan/appza-plugin
+ * Plugin URI:        https://github.com/rbraju3m/appza-core-plugin
  * Description:       APPZA 2.0 base WordPress plug-in. Serves runtime JSON to the APPZA mobile app via a single bootstrap endpoint, stores the Lazycoders catalog snapshot locally, and hosts customer-side customizations.
  * Version:           2.0.0
  * Requires at least: 6.0
