@@ -18,6 +18,7 @@ class RestRoutes {
 	public function register_routes() {
 		$bootstrap      = new BootstrapController();
 		$customizations = new CustomizationsController();
+		$preview_proxy  = new PreviewProxyController();
 
 		register_rest_route(
 			APPZA_CORE_REST_NAMESPACE,
@@ -67,6 +68,21 @@ class RestRoutes {
 				'methods'             => \WP_REST_Server::DELETABLE,
 				'callback'            => array( $customizations, 'delete' ),
 				'permission_callback' => array( $customizations, 'permission_check' ),
+			)
+		);
+
+		register_rest_route(
+			APPZA_CORE_REST_NAMESPACE,
+			'/preview/data',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => array( $preview_proxy, 'handle' ),
+				'permission_callback' => '__return_true',
+				'args'                => array(
+					'ds'       => array( 'required' => true, 'type' => 'string', 'sanitize_callback' => 'sanitize_title' ),
+					'template' => array( 'type' => 'string', 'sanitize_callback' => 'sanitize_title' ),
+					'params'   => array( 'type' => 'string' ),
+				),
 			)
 		);
 	}
