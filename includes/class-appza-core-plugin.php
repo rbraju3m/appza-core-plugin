@@ -11,9 +11,11 @@ if ( ! defined( 'WPINC' ) ) {
 use AppzaCore\Plugin\Admin\AdminController;
 use AppzaCore\Plugin\Admin\AdminMenu;
 use AppzaCore\Plugin\Admin\AssetLoader;
+use AppzaCore\Plugin\Repository\RefreshTokenRepository;
 use AppzaCore\Plugin\Rest\AuthMiddleware;
 use AppzaCore\Plugin\Rest\AuthRoutes;
 use AppzaCore\Plugin\Rest\RestRoutes;
+use AppzaCore\Plugin\Schema\SchemaManager;
 
 class Appza_Core_Plugin {
 
@@ -25,10 +27,37 @@ class Appza_Core_Plugin {
 		$this->register_auth_middleware();
 		$this->define_rest_hooks();
 		$this->define_admin_hooks();
+		$this->define_maintenance_hooks();
 	}
 
 	protected function register_auth_middleware() {
 		( new AuthMiddleware() )->register();
+	}
+
+	protected function define_maintenance_hooks() {
+		$this->loader->add_action( 'plugins_loaded', $this, 'maybe_upgrade_schema' );
+		$this->loader->add_action( Appza_Core_Activator::CRON_PURGE_REFRESH_TOKENS, $this, 'purge_refresh_tokens' );
+	}
+
+	/**
+	 * Re-runs SchemaManager::install() if the stored DB version doesn't
+	 * match the current code, and ensures the daily refresh-token purge
+	 * cron is scheduled. dbDelta is idempotent for existing tables and
+	 * CREATEs missing ones — so customers picking up a new plug-in
+	 * version (where activation hooks DON'T re-fire on update) still get
+	 * the schema brought current on first page load.
+	 */
+	public function maybe_upgrade_schema() {
+		if ( SchemaManager::DB_VERSION !== (string) get_option( 'appza_core_db_version', '0' ) ) {
+			SchemaManager::install();
+		}
+		if ( ! wp_next_scheduled( Appza_Core_Activator::CRON_PURGE_REFRESH_TOKENS ) ) {
+			wp_schedule_event( time() + HOUR_IN_SECONDS, 'daily', Appza_Core_Activator::CRON_PURGE_REFRESH_TOKENS );
+		}
+	}
+
+	public function purge_refresh_tokens() {
+		( new RefreshTokenRepository() )->purge_expired();
 	}
 
 	protected function set_locale() {

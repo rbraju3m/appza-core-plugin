@@ -12,6 +12,6 @@ if ( ! defined( 'WPINC' ) ) {
 class Appza_Core_Deactivator {
 
 	public static function deactivate() {
-		// no-op
+		wp_clear_scheduled_hook( Appza_Core_Activator::CRON_PURGE_REFRESH_TOKENS );
 	}
 }
