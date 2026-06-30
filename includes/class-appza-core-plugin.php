@@ -11,6 +11,7 @@ if ( ! defined( 'WPINC' ) ) {
 use AppzaCore\Plugin\Admin\AdminController;
 use AppzaCore\Plugin\Admin\AdminMenu;
 use AppzaCore\Plugin\Admin\AssetLoader;
+use AppzaCore\Plugin\Rest\AuthMiddleware;
 use AppzaCore\Plugin\Rest\AuthRoutes;
 use AppzaCore\Plugin\Rest\RestRoutes;
 
@@ -21,8 +22,13 @@ class Appza_Core_Plugin {
 	public function __construct() {
 		$this->loader = new Appza_Core_Loader();
 		$this->set_locale();
+		$this->register_auth_middleware();
 		$this->define_rest_hooks();
 		$this->define_admin_hooks();
+	}
+
+	protected function register_auth_middleware() {
+		( new AuthMiddleware() )->register();
 	}
 
 	protected function set_locale() {
