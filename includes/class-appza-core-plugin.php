@@ -11,6 +11,7 @@ if ( ! defined( 'WPINC' ) ) {
 use AppzaCore\Plugin\Admin\AdminController;
 use AppzaCore\Plugin\Admin\AdminMenu;
 use AppzaCore\Plugin\Admin\AssetLoader;
+use AppzaCore\Plugin\Rest\AuthRoutes;
 use AppzaCore\Plugin\Rest\RestRoutes;
 
 class Appza_Core_Plugin {
@@ -31,7 +32,9 @@ class Appza_Core_Plugin {
 
 	protected function define_rest_hooks() {
 		$rest = new RestRoutes();
+		$auth = new AuthRoutes();
 		$this->loader->add_action( 'rest_api_init', $rest, 'register_routes' );
+		$this->loader->add_action( 'rest_api_init', $auth, 'register_routes' );
 	}
 
 	protected function define_admin_hooks() {
