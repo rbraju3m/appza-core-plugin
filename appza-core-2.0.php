@@ -32,6 +32,10 @@ if ( ! defined( 'APPZA_CORE_REST_NAMESPACE' ) ) {
 	define( 'APPZA_CORE_REST_NAMESPACE', 'appza/v1' );
 }
 
+if ( ! defined( 'APPZA_CORE_AUTH_REST_NAMESPACE' ) ) {
+	define( 'APPZA_CORE_AUTH_REST_NAMESPACE', 'appza/auth/v1' );
+}
+
 if ( ! defined( 'APPZA_CORE_CONTRACTS_VERSION' ) ) {
 	define( 'APPZA_CORE_CONTRACTS_VERSION', '2.0.0' );
 }

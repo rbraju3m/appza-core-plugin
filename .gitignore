@@ -1,7 +1,9 @@
-/vendor/
 /node_modules/
 /build/
 /dist/
+
+# /vendor/ committed: customers install via zip + can't run composer. Same
+# distribution model as the React bundle in assets/admin/.
 
 *.log
 .DS_Store
