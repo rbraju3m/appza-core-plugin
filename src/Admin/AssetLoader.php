@@ -84,6 +84,7 @@ class AssetLoader {
 					// rest_cookie_check_errors filter.
 					'restNonce'       => wp_create_nonce( 'wp_rest' ),
 					'defaultTemplate' => 'fluent-community-default',
+					'assetsBase'      => esc_url_raw( $base_url ),
 				)
 			);
 		}
