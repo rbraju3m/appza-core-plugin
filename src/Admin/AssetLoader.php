@@ -78,6 +78,7 @@ class AssetLoader {
 						// form regardless of permalink settings.
 						'bootstrap'      => esc_url_raw( $this->endpoint_url( 'bootstrap' ) ),
 						'customizations' => esc_url_raw( $this->endpoint_url( 'customizations' ) ),
+						'syncFromCore'   => esc_url_raw( $this->endpoint_url( 'sync-from-core' ) ),
 					),
 					// Cookie-auth'd REST calls need this header (X-WP-Nonce).
 					// The mutating customizations endpoints check it via WP's
