@@ -15,7 +15,8 @@ class SchemaManager {
 
 	// Bumped to 2 with the wp_appza_customizations addition (Phase 1B.5a).
 	// Bumped to 3 with the wp_appza_refresh_tokens addition (Phase 1B.6 chunk 2).
-	const DB_VERSION = '3';
+	// Bumped to 4: appzet_primitive scope added to customizations ENUM (DC#20).
+	const DB_VERSION = '4';
 
 	public static function install() {
 		CatalogSnapshotSchema::install();

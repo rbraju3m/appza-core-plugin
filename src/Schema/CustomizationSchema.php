@@ -3,11 +3,19 @@
  * DDL for wp_appza_customizations per DC#13 Q1.
  *
  * Single flat overrides table — one row per (scope, target, column) override.
- * 7-value scope enum (appzet / template / template_screen /
- * template_screen_placement / data_source / action / global). Composite
- * UNIQUE per scope. Single table chosen over per-catalog-table or
- * per-scope tables for forward-compat: new catalog tables at v2+ just
- * extend the scope ENUM; no migrations.
+ * 8-value scope enum (appzet / template / template_screen /
+ * template_screen_placement / data_source / action / appzet_primitive /
+ * global). Composite UNIQUE per scope. Single table chosen over
+ * per-catalog-table or per-scope tables for forward-compat: new catalog
+ * tables at v2+ just extend the scope ENUM; no migrations.
+ *
+ * `appzet_primitive` (added DC#20 provisional — per-primitive layout axis):
+ *   target_slug           = AppZet slug (human-readable filter key)
+ *   target_slug_composite = "<appzet.slug>#children[<i>]" (unique tree key)
+ *   target_column         = "layout" (leaf blob: LayoutStyle JSON)
+ * Composite carries the slug prefix so the fold's target_key is self-
+ * contained — parallels how template_screen_placement composite already
+ * encodes `<ts.slug>#<placement_key>`.
  *
  * Overridable column inventory v1 (DC#13 Q1):
  *   appza_appzets         default_props_override (leaf), actions (structural), field_mappings (leaf)
@@ -36,10 +44,11 @@ class CustomizationSchema {
 	const TABLE = 'appza_customizations';
 
 	/**
-	 * 7 scope values per DC#13 Q1. ENUM at DB level for declarative
-	 * constraint; the PHP layer doesn't need a parallel enum class v1
-	 * because the only producer is the override admin UI (Phase 1B.5b)
-	 * which whitelists the same 7 values at form-validation time.
+	 * 8 scope values (7 from DC#13 Q1 + `appzet_primitive` from DC#20
+	 * provisional). ENUM at DB level for declarative constraint; the
+	 * PHP layer doesn't need a parallel enum class because producers
+	 * (override admin UI + plug-in-admin per-primitive Layout editor)
+	 * whitelist the same values at form-validation time.
 	 */
 	const SCOPES = array(
 		'appzet',
@@ -48,6 +57,7 @@ class CustomizationSchema {
 		'template_screen_placement',
 		'data_source',
 		'action',
+		'appzet_primitive',
 		'global',
 	);
 
@@ -84,6 +94,12 @@ class CustomizationSchema {
 
 		require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 		dbDelta( $sql );
+
+		// dbDelta is unreliable at ALTER-ing ENUM columns on tables that
+		// already exist — it often leaves the column def stale after new
+		// values are added. Issue an explicit MODIFY as belt-and-suspenders.
+		// Idempotent: MySQL accepts a MODIFY with the same target definition.
+		$wpdb->query( "ALTER TABLE {$table} MODIFY COLUMN scope ENUM({$scope_sql}) NOT NULL" );
 	}
 
 	public static function drop() {

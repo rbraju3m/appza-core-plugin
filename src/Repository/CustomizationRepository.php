@@ -167,7 +167,11 @@ class CustomizationRepository {
 		if ( 'global' === $scope ) {
 			return '';
 		}
-		if ( 'template_screen_placement' === $scope ) {
+		// Composite-keyed scopes: the tree key is the self-contained composite
+		// so lookups by (scope, key) are unambiguous. template_screen_placement
+		// composites are `<ts.slug>#<placement_key>`; appzet_primitive composites
+		// are `<appzet.slug>#children[<i>]`.
+		if ( 'template_screen_placement' === $scope || 'appzet_primitive' === $scope ) {
 			return (string) ( $row['target_slug_composite'] ?? '' );
 		}
 		return (string) ( $row['target_slug'] ?? '' );
