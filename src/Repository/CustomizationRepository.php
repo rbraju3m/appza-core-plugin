@@ -118,14 +118,36 @@ class CustomizationRepository {
 	public function find( $scope, $target_slug, $target_slug_composite, $target_column ) {
 		global $wpdb;
 		$table = CustomizationSchema::table_name();
-		// NULL-safe equality via <=> because target_slug + target_slug_composite
-		// can be NULL for global / non-composite scopes.
+
+		// wpdb->prepare() coerces PHP null through %s to '' (or 'null'
+		// depending on WP version) rather than preserving SQL NULL, so
+		// `<=> %s` degenerates to `<=> ''` and never matches real NULL
+		// rows. Branch to `IS NULL` when the value is null; use `= %s`
+		// otherwise. Same treatment for target_slug (nullable for global
+		// scope) and target_slug_composite (nullable for non-placement).
+		$where   = array( 'scope = %s' );
+		$prepare = array( $scope );
+
+		if ( null === $target_slug ) {
+			$where[] = 'target_slug IS NULL';
+		} else {
+			$where[]   = 'target_slug = %s';
+			$prepare[] = $target_slug;
+		}
+
+		if ( null === $target_slug_composite ) {
+			$where[] = 'target_slug_composite IS NULL';
+		} else {
+			$where[]   = 'target_slug_composite = %s';
+			$prepare[] = $target_slug_composite;
+		}
+
+		$where[]   = 'target_column = %s';
+		$prepare[] = $target_column;
+
 		$sql = $wpdb->prepare(
-			"SELECT * FROM {$table} WHERE scope = %s AND target_slug <=> %s AND target_slug_composite <=> %s AND target_column = %s LIMIT 1",
-			$scope,
-			$target_slug,
-			$target_slug_composite,
-			$target_column
+			"SELECT * FROM {$table} WHERE " . implode( ' AND ', $where ) . ' LIMIT 1',
+			$prepare
 		);
 		return $wpdb->get_row( $sql, ARRAY_A );
 	}
