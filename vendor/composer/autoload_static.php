@@ -7,10 +7,6 @@ namespace Composer\Autoload;
 class ComposerStaticInitfde03eb503df2cd08e2e0632dc5d8333
 {
     public static $prefixLengthsPsr4 = array (
-        'F' => 
-        array (
-            'Firebase\\JWT\\' => 13,
-        ),
         'A' => 
         array (
             'AppzaCore\\Plugin\\' => 17,
@@ -18,10 +14,6 @@ class ComposerStaticInitfde03eb503df2cd08e2e0632dc5d8333
     );
 
     public static $prefixDirsPsr4 = array (
-        'Firebase\\JWT\\' => 
-        array (
-            0 => __DIR__ . '/..' . '/firebase/php-jwt/src',
-        ),
         'AppzaCore\\Plugin\\' => 
         array (
             0 => __DIR__ . '/../..' . '/src',
@@ -43,6 +35,7 @@ class ComposerStaticInitfde03eb503df2cd08e2e0632dc5d8333
         'AppzaCore\\Plugin\\Rest\\CustomizationsController' => __DIR__ . '/../..' . '/src/Rest/CustomizationsController.php',
         'AppzaCore\\Plugin\\Rest\\PreviewProxyController' => __DIR__ . '/../..' . '/src/Rest/PreviewProxyController.php',
         'AppzaCore\\Plugin\\Rest\\RestRoutes' => __DIR__ . '/../..' . '/src/Rest/RestRoutes.php',
+        'AppzaCore\\Plugin\\Rest\\SyncFromCoreController' => __DIR__ . '/../..' . '/src/Rest/SyncFromCoreController.php',
         'AppzaCore\\Plugin\\Schema\\CatalogMetaSchema' => __DIR__ . '/../..' . '/src/Schema/CatalogMetaSchema.php',
         'AppzaCore\\Plugin\\Schema\\CatalogSnapshotSchema' => __DIR__ . '/../..' . '/src/Schema/CatalogSnapshotSchema.php',
         'AppzaCore\\Plugin\\Schema\\CustomizationSchema' => __DIR__ . '/../..' . '/src/Schema/CustomizationSchema.php',
@@ -52,14 +45,6 @@ class ComposerStaticInitfde03eb503df2cd08e2e0632dc5d8333
         'AppzaCore\\Plugin\\Services\\JwtConfig' => __DIR__ . '/../..' . '/src/Services/JwtConfig.php',
         'AppzaCore\\Plugin\\Services\\JwtService' => __DIR__ . '/../..' . '/src/Services/JwtService.php',
         'Composer\\InstalledVersions' => __DIR__ . '/..' . '/composer/InstalledVersions.php',
-        'Firebase\\JWT\\BeforeValidException' => __DIR__ . '/..' . '/firebase/php-jwt/src/BeforeValidException.php',
-        'Firebase\\JWT\\CachedKeySet' => __DIR__ . '/..' . '/firebase/php-jwt/src/CachedKeySet.php',
-        'Firebase\\JWT\\ExpiredException' => __DIR__ . '/..' . '/firebase/php-jwt/src/ExpiredException.php',
-        'Firebase\\JWT\\JWK' => __DIR__ . '/..' . '/firebase/php-jwt/src/JWK.php',
-        'Firebase\\JWT\\JWT' => __DIR__ . '/..' . '/firebase/php-jwt/src/JWT.php',
-        'Firebase\\JWT\\JWTExceptionWithPayloadInterface' => __DIR__ . '/..' . '/firebase/php-jwt/src/JWTExceptionWithPayloadInterface.php',
-        'Firebase\\JWT\\Key' => __DIR__ . '/..' . '/firebase/php-jwt/src/Key.php',
-        'Firebase\\JWT\\SignatureInvalidException' => __DIR__ . '/..' . '/firebase/php-jwt/src/SignatureInvalidException.php',
     );
 
     public static function getInitializer(ClassLoader $loader)

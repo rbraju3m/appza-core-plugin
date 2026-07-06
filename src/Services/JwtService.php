@@ -8,15 +8,15 @@
  * Verification returns the decoded claims as an array on success or a
  * WP_Error on failure (expired / signature mismatch / wrong issuer / wrong
  * audience / malformed). Callers translate the WP_Error to a 401 response.
+ *
+ * Uses a self-contained HS256 implementation (hash_hmac + hash_equals) so
+ * we carry zero third-party JWT dep and stay compatible with PHP 7.4+.
+ * Algorithm is locked to JwtConfig::ALGORITHM ('HS256'); any other `alg`
+ * header — including `none` — is rejected as a bad signature to close
+ * algorithm-confusion attacks.
  */
 
 namespace AppzaCore\Plugin\Services;
-
-use Firebase\JWT\BeforeValidException;
-use Firebase\JWT\ExpiredException;
-use Firebase\JWT\JWT;
-use Firebase\JWT\Key;
-use Firebase\JWT\SignatureInvalidException;
 
 if ( ! defined( 'WPINC' ) ) {
 	die;
@@ -32,7 +32,7 @@ class JwtService {
 	 */
 	public function issue_access_token( int $user_id ): string {
 		$now = time();
-		$payload = array(
+		return $this->encode( array(
 			'iss'  => JwtConfig::issuer(),
 			'aud'  => JwtConfig::audience(),
 			'sub'  => $user_id,
@@ -40,8 +40,7 @@ class JwtService {
 			'nbf'  => $now,
 			'exp'  => $now + JwtConfig::ACCESS_TTL,
 			'type' => JwtConfig::TOKEN_TYPE_ACCESS,
-		);
-		return JWT::encode( $payload, JwtConfig::secret(), JwtConfig::ALGORITHM );
+		) );
 	}
 
 	/**
@@ -52,7 +51,7 @@ class JwtService {
 	 */
 	public function issue_guest_token(): string {
 		$now = time();
-		$payload = array(
+		return $this->encode( array(
 			'iss'  => JwtConfig::issuer(),
 			'aud'  => JwtConfig::audience(),
 			'sub'  => 0,
@@ -60,8 +59,7 @@ class JwtService {
 			'nbf'  => $now,
 			'exp'  => $now + JwtConfig::ACCESS_TTL,
 			'type' => JwtConfig::TOKEN_TYPE_GUEST,
-		);
-		return JWT::encode( $payload, JwtConfig::secret(), JwtConfig::ALGORITHM );
+		) );
 	}
 
 	/**
@@ -76,30 +74,81 @@ class JwtService {
 			return new \WP_Error( 'appza_jwt_empty', 'Empty JWT.', array( 'status' => 401 ) );
 		}
 
-		try {
-			$decoded = JWT::decode( $jwt, new Key( JwtConfig::secret(), JwtConfig::ALGORITHM ) );
-		} catch ( ExpiredException $e ) {
-			return new \WP_Error( 'appza_jwt_expired', 'JWT has expired.', array( 'status' => 401 ) );
-		} catch ( SignatureInvalidException $e ) {
-			return new \WP_Error( 'appza_jwt_bad_signature', 'JWT signature is invalid.', array( 'status' => 401 ) );
-		} catch ( BeforeValidException $e ) {
-			return new \WP_Error( 'appza_jwt_not_yet_valid', 'JWT is not yet valid.', array( 'status' => 401 ) );
-		} catch ( \Throwable $e ) {
+		$parts = explode( '.', $jwt );
+		if ( 3 !== count( $parts ) ) {
 			return new \WP_Error( 'appza_jwt_malformed', 'JWT could not be decoded.', array( 'status' => 401 ) );
 		}
 
-		$claims = (array) $decoded;
+		list( $header_b64, $payload_b64, $sig_b64 ) = $parts;
 
-		if ( ( $claims['iss'] ?? null ) !== JwtConfig::issuer() ) {
+		$header_json  = self::base64url_decode( $header_b64 );
+		$payload_json = self::base64url_decode( $payload_b64 );
+		$sig          = self::base64url_decode( $sig_b64 );
+
+		if ( false === $header_json || false === $payload_json || false === $sig ) {
+			return new \WP_Error( 'appza_jwt_malformed', 'JWT could not be decoded.', array( 'status' => 401 ) );
+		}
+
+		$header = json_decode( $header_json, true );
+		$claims = json_decode( $payload_json, true );
+
+		if ( ! is_array( $header ) || ! is_array( $claims ) ) {
+			return new \WP_Error( 'appza_jwt_malformed', 'JWT could not be decoded.', array( 'status' => 401 ) );
+		}
+
+		// Lock algorithm to JwtConfig::ALGORITHM. Anything else — including
+		// missing `alg`, `none`, or a swap to an asymmetric alg — fails here.
+		if ( ( isset( $header['alg'] ) ? $header['alg'] : '' ) !== JwtConfig::ALGORITHM ) {
+			return new \WP_Error( 'appza_jwt_bad_signature', 'JWT signature is invalid.', array( 'status' => 401 ) );
+		}
+
+		$expected_sig = hash_hmac( 'sha256', $header_b64 . '.' . $payload_b64, JwtConfig::secret(), true );
+		if ( ! hash_equals( $expected_sig, $sig ) ) {
+			return new \WP_Error( 'appza_jwt_bad_signature', 'JWT signature is invalid.', array( 'status' => 401 ) );
+		}
+
+		$now = time();
+
+		if ( isset( $claims['nbf'] ) && (int) $claims['nbf'] > $now ) {
+			return new \WP_Error( 'appza_jwt_not_yet_valid', 'JWT is not yet valid.', array( 'status' => 401 ) );
+		}
+		if ( ! isset( $claims['nbf'] ) && isset( $claims['iat'] ) && (int) $claims['iat'] > $now ) {
+			return new \WP_Error( 'appza_jwt_not_yet_valid', 'JWT is not yet valid.', array( 'status' => 401 ) );
+		}
+		if ( isset( $claims['exp'] ) && (int) $claims['exp'] <= $now ) {
+			return new \WP_Error( 'appza_jwt_expired', 'JWT has expired.', array( 'status' => 401 ) );
+		}
+
+		if ( ( isset( $claims['iss'] ) ? $claims['iss'] : null ) !== JwtConfig::issuer() ) {
 			return new \WP_Error( 'appza_jwt_bad_issuer', 'JWT issuer mismatch.', array( 'status' => 401 ) );
 		}
-		if ( ( $claims['aud'] ?? null ) !== JwtConfig::audience() ) {
+		if ( ( isset( $claims['aud'] ) ? $claims['aud'] : null ) !== JwtConfig::audience() ) {
 			return new \WP_Error( 'appza_jwt_bad_audience', 'JWT audience mismatch.', array( 'status' => 401 ) );
 		}
-		if ( ! in_array( $claims['type'] ?? null, array( JwtConfig::TOKEN_TYPE_ACCESS, JwtConfig::TOKEN_TYPE_GUEST ), true ) ) {
+		if ( ! in_array( isset( $claims['type'] ) ? $claims['type'] : null, array( JwtConfig::TOKEN_TYPE_ACCESS, JwtConfig::TOKEN_TYPE_GUEST ), true ) ) {
 			return new \WP_Error( 'appza_jwt_bad_type', 'JWT type is not access or guest.', array( 'status' => 401 ) );
 		}
 
 		return $claims;
+	}
+
+	private function encode( array $payload ): string {
+		$header        = array( 'typ' => 'JWT', 'alg' => JwtConfig::ALGORITHM );
+		$header_b64    = self::base64url_encode( wp_json_encode( $header ) );
+		$payload_b64   = self::base64url_encode( wp_json_encode( $payload ) );
+		$signing_input = $header_b64 . '.' . $payload_b64;
+		$sig           = hash_hmac( 'sha256', $signing_input, JwtConfig::secret(), true );
+		return $signing_input . '.' . self::base64url_encode( $sig );
+	}
+
+	private static function base64url_encode( string $data ): string {
+		return rtrim( strtr( base64_encode( $data ), '+/', '-_' ), '=' );
+	}
+
+	/**
+	 * @return string|false Raw bytes, or false if the input isn't valid base64url.
+	 */
+	private static function base64url_decode( string $data ) {
+		return base64_decode( strtr( $data, '-_', '+/' ), true );
 	}
 }

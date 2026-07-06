@@ -5,7 +5,7 @@
  * Description:       APPZA 2.0 base WordPress plug-in. Serves runtime JSON to the APPZA mobile app via a single bootstrap endpoint, stores the Lazycoders catalog snapshot locally, and hosts customer-side customizations.
  * Version:           2.0.0
  * Requires at least: 6.0
- * Requires PHP:      8.0
+ * Requires PHP:      7.4
  * Author:            Lazycoders
  * Author URI:        https://lazycoders.co
  * License:           GPL-2.0+
@@ -16,6 +16,20 @@
 
 if ( ! defined( 'WPINC' ) ) {
 	die;
+}
+
+if ( version_compare( PHP_VERSION, '7.4', '<' ) ) {
+	add_action( 'admin_notices', function () {
+		printf(
+			'<div class="notice notice-error"><p>%s</p></div>',
+			esc_html( sprintf(
+				/* translators: %s: current PHP version */
+				__( 'APPZA Core 2.0 requires PHP 7.4 or higher. You are running PHP %s. Please upgrade PHP to run this plug-in.', 'appza-core' ),
+				PHP_VERSION
+			) )
+		);
+	} );
+	return;
 }
 
 define( 'APPZA_CORE_VERSION', '2.0.0' );

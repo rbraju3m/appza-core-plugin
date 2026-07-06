@@ -4,8 +4,7 @@
     "type": "wordpress-plugin",
     "license": "GPL-2.0+",
     "require": {
-        "php": ">=8.0",
-        "firebase/php-jwt": "^7.0"
+        "php": ">=7.4"
     },
     "autoload": {
         "psr-4": {
@@ -14,6 +13,9 @@
     },
     "config": {
         "optimize-autoloader": true,
-        "sort-packages": true
+        "sort-packages": true,
+        "platform": {
+            "php": "7.4"
+        }
     }
 }
