@@ -292,9 +292,54 @@ class PreviewProxyController {
 		switch ( $ds_slug ) {
 			case 'fc-feed':
 				return $this->fixture_fc_feed();
+			case 'fc-welcome-banner':
+				return $this->fixture_fc_welcome_banner();
+			case 'fc-current-user':
+				return $this->fixture_fc_current_user();
 			default:
 				return array();
 		}
+	}
+
+	/**
+	 * Demo current-user profile for the composer teaser avatar. Real
+	 * endpoint (/wp-json/fcom-mobile/api/v1/user/profile-avatar) needs
+	 * an auth session — this fixture lets the plug-in-admin simulator
+	 * still render an avatar without login.
+	 */
+	protected function fixture_fc_current_user() {
+		return array(
+			array(
+				'avatar'       => 'https://i.pravatar.cc/80?img=12',
+				'display_name' => 'Syed',
+				'first_name'   => 'Syed',
+			),
+		);
+	}
+
+	/**
+	 * Demo banner content matching the image-1 design: hero image + title +
+	 * short description + 4 CTAs in the 2-per-row layout. Used when the real
+	 * fcom-mobile welcome-banner endpoint is unavailable OR the caller
+	 * explicitly requests mode=demo.
+	 */
+	protected function fixture_fc_welcome_banner() {
+		return array(
+			array(
+				'enabled'              => 'yes',
+				'title'                => 'Build Mobile Apps With Zero Coding',
+				'description_rendered' => '<p>Bring your website to the mobile world without a single line of code, be it blog, e-commerce, LMS or anything else. Custom components give you full control over the look and feel.</p>',
+				'mediaType'            => 'image',
+				'bannerImage'          => 'https://picsum.photos/seed/appza-banner/800/450',
+				'bannerVideo'          => null,
+				'ctaButtons'           => array(
+					array( 'label' => 'Try Demo',      'link' => 'https://appza.io/demo',     'type' => 'primary',   'newTab' => 'yes' ),
+					array( 'label' => 'Buy Now',       'link' => 'https://appza.io/buy',      'type' => 'secondary', 'newTab' => 'yes' ),
+					array( 'label' => 'Download Free', 'link' => 'https://appza.io/download', 'type' => 'primary',   'newTab' => 'yes' ),
+					array( 'label' => 'Pricing',       'link' => 'https://appza.io/pricing',  'type' => 'link',      'newTab' => 'yes' ),
+				),
+			),
+		);
 	}
 
 	protected function fixture_fc_feed() {
