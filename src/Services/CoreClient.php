@@ -30,6 +30,74 @@ class CoreClient {
 	public function fetch_snapshot( $template_slug ) {
 		$url = trailingslashit( APPZA_CORE_API_URL ) . 'catalog/snapshot?template=' . rawurlencode( $template_slug );
 
+		$data = $this->get_json( $url );
+		if ( is_wp_error( $data ) ) {
+			return $data;
+		}
+
+		foreach ( array( 'catalog_snapshot_version', 'core_api_version', 'snapshot' ) as $required ) {
+			if ( ! array_key_exists( $required, $data ) ) {
+				return new \WP_Error(
+					'appza_core_shape_error',
+					sprintf( __( 'Core response missing required key: %s', 'appza-core' ), $required )
+				);
+			}
+		}
+
+		return $data;
+	}
+
+	/**
+	 * Fetches Templates from the Core. When $slugs is a non-empty array,
+	 * the Core filters to Templates whose Source Integration slug is in
+	 * that list. Pass an empty array explicitly to signal "no integrations
+	 * picked → return nothing"; pass null to omit the filter (all active).
+	 */
+	public function fetch_templates( $slugs = null ) {
+		$url = trailingslashit( APPZA_CORE_API_URL ) . 'catalog/templates';
+		if ( is_array( $slugs ) ) {
+			$url .= '?source_integrations=' . rawurlencode( implode( ',', $slugs ) );
+		}
+
+		$data = $this->get_json( $url );
+		if ( is_wp_error( $data ) ) {
+			return $data;
+		}
+
+		if ( ! array_key_exists( 'templates', $data ) || ! is_array( $data['templates'] ) ) {
+			return new \WP_Error(
+				'appza_core_shape_error',
+				__( 'Core response missing templates array', 'appza-core' )
+			);
+		}
+
+		return $data;
+	}
+
+	/**
+	 * Fetches the active Source Integrations list from the Core.
+	 * Returns the decoded envelope `{ core_api_version, source_integrations[] }`
+	 * or a WP_Error on transport/shape failure.
+	 */
+	public function fetch_source_integrations() {
+		$url = trailingslashit( APPZA_CORE_API_URL ) . 'catalog/source-integrations';
+
+		$data = $this->get_json( $url );
+		if ( is_wp_error( $data ) ) {
+			return $data;
+		}
+
+		if ( ! array_key_exists( 'source_integrations', $data ) || ! is_array( $data['source_integrations'] ) ) {
+			return new \WP_Error(
+				'appza_core_shape_error',
+				__( 'Core response missing source_integrations array', 'appza-core' )
+			);
+		}
+
+		return $data;
+	}
+
+	protected function get_json( $url ) {
 		$response = wp_remote_get( $url, array(
 			'timeout' => 15,
 			'headers' => array(
@@ -51,19 +119,9 @@ class CoreClient {
 			);
 		}
 
-		$body = wp_remote_retrieve_body( $response );
-		$data = json_decode( $body, true );
+		$data = json_decode( wp_remote_retrieve_body( $response ), true );
 		if ( ! is_array( $data ) ) {
 			return new \WP_Error( 'appza_core_parse_error', __( 'Core response was not valid JSON', 'appza-core' ) );
-		}
-
-		foreach ( array( 'catalog_snapshot_version', 'core_api_version', 'snapshot' ) as $required ) {
-			if ( ! array_key_exists( $required, $data ) ) {
-				return new \WP_Error(
-					'appza_core_shape_error',
-					sprintf( __( 'Core response missing required key: %s', 'appza-core' ), $required )
-				);
-			}
 		}
 
 		return $data;

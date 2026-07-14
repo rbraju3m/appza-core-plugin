@@ -20,6 +20,49 @@ class RestRoutes {
 		$customizations = new CustomizationsController();
 		$preview_proxy  = new PreviewProxyController();
 		$sync           = new SyncFromCoreController();
+		$source_ints    = new SourceIntegrationsController();
+		$active_sources = new ActiveSourceIntegrationsController();
+		$templates_list = new TemplatesController();
+
+		register_rest_route(
+			APPZA_CORE_REST_NAMESPACE,
+			'/source-integrations',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => array( $source_ints, 'handle' ),
+				'permission_callback' => '__return_true',
+			)
+		);
+
+		register_rest_route(
+			APPZA_CORE_REST_NAMESPACE,
+			'/templates',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => array( $templates_list, 'handle' ),
+				'permission_callback' => '__return_true',
+			)
+		);
+
+		register_rest_route(
+			APPZA_CORE_REST_NAMESPACE,
+			'/active-source-integrations',
+			array(
+				array(
+					'methods'             => \WP_REST_Server::READABLE,
+					'callback'            => array( $active_sources, 'get' ),
+					'permission_callback' => array( $active_sources, 'permission_check' ),
+				),
+				array(
+					'methods'             => \WP_REST_Server::CREATABLE,
+					'callback'            => array( $active_sources, 'put' ),
+					'permission_callback' => array( $active_sources, 'permission_check' ),
+					'args'                => array(
+						'slugs' => array( 'required' => true ),
+					),
+				),
+			)
+		);
 
 		register_rest_route(
 			APPZA_CORE_REST_NAMESPACE,

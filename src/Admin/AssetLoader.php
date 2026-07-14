@@ -76,9 +76,12 @@ class AssetLoader {
 						// Apache rewrites are broken can define
 						// APPZA_CORE_FORCE_QUERY_REST so we hand the query
 						// form regardless of permalink settings.
-						'bootstrap'      => esc_url_raw( $this->endpoint_url( 'bootstrap' ) ),
-						'customizations' => esc_url_raw( $this->endpoint_url( 'customizations' ) ),
-						'syncFromCore'   => esc_url_raw( $this->endpoint_url( 'sync-from-core' ) ),
+						'bootstrap'                => esc_url_raw( $this->endpoint_url( 'bootstrap' ) ),
+						'customizations'           => esc_url_raw( $this->endpoint_url( 'customizations' ) ),
+						'syncFromCore'             => esc_url_raw( $this->endpoint_url( 'sync-from-core' ) ),
+						'sourceIntegrations'       => esc_url_raw( $this->endpoint_url( 'source-integrations' ) ),
+						'activeSourceIntegrations' => esc_url_raw( $this->endpoint_url( 'active-source-integrations' ) ),
+						'templates'                => esc_url_raw( $this->endpoint_url( 'templates' ) ),
 					),
 					// Cookie-auth'd REST calls need this header (X-WP-Nonce).
 					// The mutating customizations endpoints check it via WP's
