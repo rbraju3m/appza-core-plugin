@@ -188,8 +188,50 @@ class PreviewProxyController {
 			if ( ! empty( $images ) ) {
 				$items[ $i ]['images'] = $images;
 			}
+			// Banner CTA buttons: derive Ionic fill/color from the API's
+			// `type` string so the renderer can bind them directly without
+			// hardcoding per-slot styling. type=primary → filled primary;
+			// type=secondary → outlined primary; type=link → clear/text.
+			if ( isset( $item['ctaButtons'] ) && is_array( $item['ctaButtons'] ) ) {
+				$items[ $i ]['ctaButtons'] = $this->normalize_cta_buttons( $item['ctaButtons'] );
+			}
 		}
 		return $items;
+	}
+
+	protected function normalize_cta_buttons( $buttons ) {
+		if ( ! is_array( $buttons ) ) {
+			return $buttons;
+		}
+		$out = array();
+		foreach ( $buttons as $btn ) {
+			if ( ! is_array( $btn ) ) {
+				continue;
+			}
+			$type = isset( $btn['type'] ) ? (string) $btn['type'] : 'primary';
+			switch ( $type ) {
+				case 'secondary':
+					$btn['fill']  = 'outline';
+					$btn['color'] = 'primary';
+					break;
+				case 'link':
+					$btn['fill']  = 'clear';
+					$btn['color'] = 'primary';
+					break;
+				case 'muted':
+				case 'ghost':
+					$btn['fill']  = 'solid';
+					$btn['color'] = 'medium';
+					break;
+				case 'primary':
+				default:
+					$btn['fill']  = 'solid';
+					$btn['color'] = 'primary';
+					break;
+			}
+			$out[] = $btn;
+		}
+		return $out;
 	}
 
 	protected function build_images_from_meta( $meta ) {
