@@ -52,7 +52,15 @@ class PreviewProxyController {
 			return new \WP_Error( 'appza_preview_missing_ds', __( 'ds query parameter is required', 'appza-core' ), array( 'status' => 400 ) );
 		}
 
-		$cache_key = 'appza_preview_' . md5( $template_slug . '|' . $ds_slug . '|' . $params_json . '|' . $mode );
+		// Forward the browser's Authorization header (if any) to the upstream
+		// endpoint so user-scoped data sources (fc-current-user, feeds for
+		// the logged-in user, etc.) return the actual signed-in user's data
+		// instead of empty/anonymous responses. Cache key includes an auth
+		// hash so different users don't see each other's data.
+		$auth_header = $this->extract_auth_header( $request );
+		$auth_bucket = $auth_header ? substr( md5( $auth_header ), 0, 12 ) : 'anon';
+
+		$cache_key = 'appza_preview_' . md5( $template_slug . '|' . $ds_slug . '|' . $params_json . '|' . $mode . '|' . $auth_bucket );
 		// `nocache=1` bypasses the transient read (still writes fresh result
 		// after fetch, so subsequent normal reads benefit). Used by
 		// plug-in-admin's Refresh button + window-focus revalidation to
@@ -69,13 +77,13 @@ class PreviewProxyController {
 			$payload = $this->fixture_for( $ds_slug );
 		} elseif ( 'real' === $mode ) {
 			$endpoint = $this->resolve_endpoint( $template_slug, $ds_slug );
-			$payload  = $endpoint ? $this->fetch_upstream( $endpoint, $params_json ) : null;
+			$payload  = $endpoint ? $this->fetch_upstream( $endpoint, $params_json, $auth_header ) : null;
 			if ( ! is_array( $payload ) ) {
 				$payload = array();
 			}
 		} else {
 			$endpoint = $this->resolve_endpoint( $template_slug, $ds_slug );
-			$payload  = $endpoint ? $this->fetch_upstream( $endpoint, $params_json ) : null;
+			$payload  = $endpoint ? $this->fetch_upstream( $endpoint, $params_json, $auth_header ) : null;
 			if ( ! is_array( $payload ) ) {
 				$payload = $this->fixture_for( $ds_slug );
 			}
@@ -86,6 +94,26 @@ class PreviewProxyController {
 		set_transient( $cache_key, $payload, self::CACHE_TTL );
 
 		return rest_ensure_response( $payload );
+	}
+
+	/**
+	 * Read the incoming Authorization header. Preference order:
+	 *   1. Explicit `X-Appza-Auth` header (set by the plug-in-admin so
+	 *      the browser can pass Basic Auth without the WP REST layer
+	 *      short-circuiting on the standard Authorization header).
+	 *   2. Standard `Authorization` header if present + non-empty.
+	 * Returns the raw header value (e.g. `Basic <base64>`) or null.
+	 */
+	protected function extract_auth_header( \WP_REST_Request $request ) {
+		$appza = $request->get_header( 'x_appza_auth' );
+		if ( is_string( $appza ) && '' !== $appza ) {
+			return $appza;
+		}
+		$std = $request->get_header( 'authorization' );
+		if ( is_string( $std ) && '' !== $std ) {
+			return $std;
+		}
+		return null;
 	}
 
 	protected function resolve_endpoint( $template_slug, $ds_slug ) {
@@ -104,7 +132,7 @@ class PreviewProxyController {
 		return null;
 	}
 
-	protected function fetch_upstream( $endpoint, $params_json ) {
+	protected function fetch_upstream( $endpoint, $params_json, $auth_header = null ) {
 		$url = home_url( $endpoint );
 		$params = array();
 		if ( '' !== $params_json ) {
@@ -117,12 +145,19 @@ class PreviewProxyController {
 			$url = add_query_arg( $params, $url );
 		}
 
+		$headers = array(
+			'Accept'     => 'application/json',
+			'User-Agent' => 'APPZA-Preview-Proxy',
+		);
+		// Forward the caller's Basic Auth so user-scoped upstream endpoints
+		// (fc-current-user etc.) return the actual signed-in user's data.
+		if ( is_string( $auth_header ) && '' !== $auth_header ) {
+			$headers['Authorization'] = $auth_header;
+		}
+
 		$response = wp_remote_get( $url, array(
 			'timeout' => 8,
-			'headers' => array(
-				'Accept'     => 'application/json',
-				'User-Agent' => 'APPZA-Preview-Proxy',
-			),
+			'headers' => $headers,
 		) );
 
 		if ( is_wp_error( $response ) ) {
