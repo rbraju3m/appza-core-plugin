@@ -298,7 +298,62 @@ class PreviewProxyController {
 				$items[ $i ]['ctaButtons'] = $this->normalize_cta_buttons( $item['ctaButtons'] );
 			}
 		}
+		// Rewrite media URLs to point at the current request host.
+		// FluentCommunity stores absolute URLs at write time using WP's
+		// `siteurl` option (e.g. http://www.tutor-lms-mobile.local/...).
+		// On a mobile app hitting the site via a public tunnel or LAN IP,
+		// those stored URLs are unreachable from the client. Walk the
+		// response, string-replace stored siteurl with the incoming host
+		// + scheme so images resolve everywhere.
+		$items = $this->rewrite_urls_for_current_host( $items );
 		return $items;
+	}
+
+	protected function rewrite_urls_for_current_host( $data ) {
+		$stored = rtrim( (string) get_option( 'siteurl', '' ), '/' );
+		if ( '' === $stored ) {
+			return $data;
+		}
+		// Also strip a common http/https prefix pair so a stored siteurl of
+		// http://foo works for an incoming https://foo request (WP HTTPS
+		// admin behind a tunnel is common) and vice versa.
+		$stored_host = preg_replace( '#^https?://#i', '', $stored );
+
+		$scheme = ! empty( $_SERVER['HTTP_X_FORWARDED_PROTO'] )
+			? strtolower( (string) $_SERVER['HTTP_X_FORWARDED_PROTO'] )
+			: ( ( ! empty( $_SERVER['HTTPS'] ) && 'off' !== strtolower( $_SERVER['HTTPS'] ) ) ? 'https' : 'http' );
+		$host = ! empty( $_SERVER['HTTP_X_FORWARDED_HOST'] )
+			? (string) $_SERVER['HTTP_X_FORWARDED_HOST']
+			: ( ! empty( $_SERVER['HTTP_HOST'] ) ? (string) $_SERVER['HTTP_HOST'] : $stored_host );
+		$target = $scheme . '://' . rtrim( $host, '/' );
+
+		// Nothing to do if incoming request already came in on the stored URL.
+		if ( $target === $stored ) {
+			return $data;
+		}
+		$from_variants = array(
+			'http://' . $stored_host,
+			'https://' . $stored_host,
+		);
+		return $this->walk_and_replace_urls( $data, $from_variants, $target );
+	}
+
+	protected function walk_and_replace_urls( $node, array $from_variants, $to ) {
+		if ( is_array( $node ) ) {
+			foreach ( $node as $k => $v ) {
+				$node[ $k ] = $this->walk_and_replace_urls( $v, $from_variants, $to );
+			}
+			return $node;
+		}
+		if ( is_string( $node ) ) {
+			foreach ( $from_variants as $from ) {
+				if ( strpos( $node, $from ) !== false ) {
+					$node = str_replace( $from, $to, $node );
+				}
+			}
+			return $node;
+		}
+		return $node;
 	}
 
 	protected function normalize_cta_buttons( $buttons ) {

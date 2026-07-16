@@ -23,6 +23,7 @@ class RestRoutes {
 		$source_ints    = new SourceIntegrationsController();
 		$active_sources = new ActiveSourceIntegrationsController();
 		$templates_list = new TemplatesController();
+		$build_requests = new BuildRequestsController();
 
 		register_rest_route(
 			APPZA_CORE_REST_NAMESPACE,
@@ -128,6 +129,22 @@ class RestRoutes {
 						'type'              => 'string',
 						'sanitize_callback' => 'sanitize_title',
 					),
+				),
+			)
+		);
+
+		register_rest_route(
+			APPZA_CORE_REST_NAMESPACE,
+			'/build-requests',
+			array(
+				'methods'             => \WP_REST_Server::CREATABLE,
+				'callback'            => array( $build_requests, 'create' ),
+				'permission_callback' => array( $build_requests, 'permission_check' ),
+				'args'                => array(
+					'source_integration_slug' => array( 'required' => true, 'type' => 'string' ),
+					'template_slug'           => array( 'required' => true, 'type' => 'string' ),
+					'base_url_mode'           => array( 'required' => true, 'type' => 'string' ),
+					'custom_base_url'         => array( 'type' => 'string' ),
 				),
 			)
 		);

@@ -82,6 +82,7 @@ class AssetLoader {
 						'sourceIntegrations'       => esc_url_raw( $this->endpoint_url( 'source-integrations' ) ),
 						'activeSourceIntegrations' => esc_url_raw( $this->endpoint_url( 'active-source-integrations' ) ),
 						'templates'                => esc_url_raw( $this->endpoint_url( 'templates' ) ),
+							'buildRequests'            => esc_url_raw( $this->endpoint_url( 'build-requests' ) ),
 					),
 					// Cookie-auth'd REST calls need this header (X-WP-Nonce).
 					// The mutating customizations endpoints check it via WP's
@@ -89,6 +90,8 @@ class AssetLoader {
 					'restNonce'       => wp_create_nonce( 'wp_rest' ),
 					'defaultTemplate' => 'fluent-community-default',
 					'assetsBase'      => esc_url_raw( $base_url ),
+					// Auto-fill target for the Build App modal's "Current site URL" option.
+					'siteUrl'         => esc_url_raw( get_site_url() ),
 				)
 			);
 		}
