@@ -89,7 +89,8 @@ class PreviewProxyController {
 			}
 		}
 
-		$payload = $this->normalize_items( $payload );
+		$viewer_id = $this->resolve_viewer_id( $auth_header );
+		$payload = $this->normalize_items( $payload, $viewer_id );
 
 		set_transient( $cache_key, $payload, self::CACHE_TTL );
 
@@ -114,6 +115,33 @@ class PreviewProxyController {
 			return $std;
 		}
 		return null;
+	}
+
+	/**
+	 * Decode the Basic Auth header we forwarded to the upstream + resolve
+	 * the WP user id from the username. Used to enrich feed items with the
+	 * viewer's own reaction state (like/bookmark) so the renderer can bind
+	 * icon + color per-item without a second round-trip.
+	 *
+	 * FC's feed listing eager-loads only `reactions.type = 'like'`, so
+	 * bookmark state never surfaces there — we query the reactions table
+	 * directly in normalize_items() using the id resolved here.
+	 */
+	protected function resolve_viewer_id( $auth_header ) {
+		if ( ! is_string( $auth_header ) || 0 !== stripos( $auth_header, 'basic ' ) ) {
+			return 0;
+		}
+		$b64 = trim( substr( $auth_header, 6 ) );
+		$decoded = base64_decode( $b64, true );
+		if ( ! is_string( $decoded ) || strpos( $decoded, ':' ) === false ) {
+			return 0;
+		}
+		list( $username, ) = explode( ':', $decoded, 2 );
+		if ( '' === $username ) {
+			return 0;
+		}
+		$user = get_user_by( 'login', $username );
+		return $user ? (int) $user->ID : 0;
 	}
 
 	protected function resolve_endpoint( $template_slug, $ds_slug ) {
@@ -194,11 +222,50 @@ class PreviewProxyController {
 	 * fixture shape stays honest to the real API + demo/real render the
 	 * same way.
 	 */
-	protected function normalize_items( $items ) {
+	protected function normalize_items( $items, $viewer_id = 0 ) {
 		if ( ! is_array( $items ) ) {
 			return $items;
 		}
+		// Batch-fetch the viewer's own reactions for the returned feed_ids
+		// so each item can carry a `my_reactions` array without an
+		// per-item query. FC eager-loads `type='like'` on the feed listing
+		// but bookmark reactions are stored in the same table, so this is
+		// the only place the renderer can learn bookmark state.
+		$my_reactions_by_feed = array();
+		if ( $viewer_id > 0 ) {
+			$feed_ids = array();
+			foreach ( $items as $it ) {
+				if ( is_array( $it ) && isset( $it['id'] ) && is_numeric( $it['id'] ) ) {
+					$feed_ids[] = (int) $it['id'];
+				}
+			}
+			if ( ! empty( $feed_ids ) ) {
+				global $wpdb;
+				$placeholders = implode( ',', array_fill( 0, count( $feed_ids ), '%d' ) );
+				$params = array_merge( array( $viewer_id ), $feed_ids );
+				$sql = "SELECT object_id, type FROM {$wpdb->prefix}fcom_post_reactions WHERE object_type = 'feed' AND user_id = %d AND object_id IN ($placeholders)";
+				$rows = $wpdb->get_results( $wpdb->prepare( $sql, $params ), ARRAY_A );
+				if ( is_array( $rows ) ) {
+					foreach ( $rows as $r ) {
+						$fid = isset( $r['object_id'] ) ? (int) $r['object_id'] : 0;
+						$type = isset( $r['type'] ) ? (string) $r['type'] : '';
+						if ( $fid && $type ) {
+							if ( ! isset( $my_reactions_by_feed[ $fid ] ) ) {
+								$my_reactions_by_feed[ $fid ] = array();
+							}
+							$my_reactions_by_feed[ $fid ][] = $type;
+						}
+					}
+				}
+			}
+		}
 		foreach ( $items as $i => $item ) {
+			if ( is_array( $item ) && isset( $item['id'] ) && is_numeric( $item['id'] ) ) {
+				$fid = (int) $item['id'];
+				$items[ $i ]['my_reactions'] = isset( $my_reactions_by_feed[ $fid ] )
+					? $my_reactions_by_feed[ $fid ]
+					: array();
+			}
 			if ( ! is_array( $item ) ) {
 				continue;
 			}
