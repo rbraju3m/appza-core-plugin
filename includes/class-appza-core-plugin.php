@@ -14,6 +14,7 @@ use AppzaCore\Plugin\Admin\AssetLoader;
 use AppzaCore\Plugin\Repository\RefreshTokenRepository;
 use AppzaCore\Plugin\Rest\AuthMiddleware;
 use AppzaCore\Plugin\Rest\AuthRoutes;
+use AppzaCore\Plugin\Rest\FluentCommunityFeedPermissionsFilter;
 use AppzaCore\Plugin\Rest\RestRoutes;
 use AppzaCore\Plugin\Schema\SchemaManager;
 
@@ -68,8 +69,15 @@ class Appza_Core_Plugin {
 	protected function define_rest_hooks() {
 		$rest = new RestRoutes();
 		$auth = new AuthRoutes();
+		// Post-dispatch filter attaches a `permissions` bag to feed rows
+		// returned by fcom-mobile — the mobile 3-dot menu reads it to
+		// decide which entries to show per viewer. Lives here rather
+		// than editing the fcom-mobile plugin so third-party sources
+		// stay untouched.
+		$fcFeedPerms = new FluentCommunityFeedPermissionsFilter();
 		$this->loader->add_action( 'rest_api_init', $rest, 'register_routes' );
 		$this->loader->add_action( 'rest_api_init', $auth, 'register_routes' );
+		$this->loader->add_action( 'rest_api_init', $fcFeedPerms, 'register_hooks' );
 	}
 
 	protected function define_admin_hooks() {
