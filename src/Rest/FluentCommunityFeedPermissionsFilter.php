@@ -1,17 +1,19 @@
 <?php
 /**
- * Hooks `rest_post_dispatch` to attach a `permissions` bag to every FluentCommunity
- * feed row returned by fcom-mobile's REST endpoints.
+ * Hooks `rest_request_after_callbacks` to attach a `permissions` bag to every
+ * FluentCommunity feed row returned by fcom-mobile's REST endpoints.
  *
  * The bag drives the mobile 3-dot menu's per-item visibility (Edit, Delete,
  * Pin, Report, Disable/Enable Comments). Computed server-side using
  * FluentCommunity's own capability helpers so results match what the web
  * portal would show for the same viewer.
  *
- * Runs post-dispatch so we don't own the fcom-mobile endpoint definitions —
- * we just inspect + patch the outgoing response. Fires for both external
- * mobile calls to `/wp-json/fcom-mobile/*` and internal `rest_do_request`
- * calls from PreviewProxyController (WP-admin simulator path).
+ * Runs inside dispatch() (not post_dispatch) so the filter fires for the
+ * internal `rest_do_request` calls made by PreviewProxyController for the
+ * WP-admin simulator — `rest_post_dispatch` only fires for the outer
+ * serve_request and would miss sub-requests entirely. Also covers direct
+ * mobile-app calls to `/wp-json/fcom-mobile/*` (dispatch runs the same
+ * filter on any route).
  */
 
 namespace AppzaCore\Plugin\Rest;
@@ -37,16 +39,20 @@ class FluentCommunityFeedPermissionsFilter {
 	];
 
 	public function register_hooks() {
-		add_filter( 'rest_post_dispatch', [ $this, 'attach_permissions' ], 10, 3 );
+		// rest_request_after_callbacks fires inside WP_REST_Server::dispatch()
+		// after the route callback returns — so we catch both the outer
+		// serve_request() dispatch AND any rest_do_request() sub-calls (which
+		// only ever go through dispatch, never through serve_request).
+		add_filter( 'rest_request_after_callbacks', [ $this, 'attach_permissions' ], 10, 3 );
 	}
 
 	/**
-	 * @param \WP_REST_Response $response
-	 * @param \WP_REST_Server   $server
-	 * @param \WP_REST_Request  $request
-	 * @return \WP_REST_Response
+	 * @param \WP_REST_Response|\WP_HTTP_Response|\WP_Error|mixed $response
+	 * @param array                                              $handler
+	 * @param \WP_REST_Request                                   $request
+	 * @return mixed
 	 */
-	public function attach_permissions( $response, $server, $request ) {
+	public function attach_permissions( $response, $handler, $request ) {
 		if ( ! $response instanceof \WP_REST_Response ) {
 			return $response;
 		}
