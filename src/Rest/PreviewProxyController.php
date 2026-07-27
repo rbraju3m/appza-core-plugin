@@ -161,7 +161,6 @@ class PreviewProxyController {
 	}
 
 	protected function fetch_upstream( $endpoint, $params_json, $auth_header = null ) {
-		$url = home_url( $endpoint );
 		$params = array();
 		if ( '' !== $params_json ) {
 			$decoded = json_decode( $params_json, true );
@@ -169,6 +168,64 @@ class PreviewProxyController {
 				$params = $decoded;
 			}
 		}
+
+		// Upstream endpoints all live on this same WP install (fcom-mobile,
+		// appza-builder, tutor-lms-mobile). Prefer rest_do_request over
+		// wp_remote_get: it dispatches the callback in-process so the WP
+		// current-user context (cookie session from the WP-admin simulator)
+		// is preserved without having to forward cookies or invent an
+		// Authorization header. This is what lets fcom-mobile's transformer
+		// see the correct viewer via Helper::getCurrentUser() and attach a
+		// meaningful permissions bag — otherwise every menu row gated on
+		// data.permissions.* is hidden.
+		//
+		// Externally-called endpoints (mobile app with Basic Auth) still
+		// fall through wp_remote_get so the Authorization header round-trips
+		// correctly across the wire boundary.
+		if ( '' !== $endpoint && '/' === $endpoint[0] && 0 === strpos( $endpoint, '/wp-json/' ) ) {
+			$route = substr( $endpoint, strlen( '/wp-json' ) );
+			// Resolve the viewer from the forwarded Basic Auth token BEFORE
+			// dispatching so the sub-request's Helper::getCurrentUser() sees
+			// the same user as the browser. WP core does not parse Basic
+			// Auth; without this step get_current_user_id() stays 0 and
+			// every permission (edit / delete / moderate) resolves to false.
+			$prev_user_id = get_current_user_id();
+			$sub_user_id  = $this->resolve_viewer_id( $auth_header );
+			if ( $sub_user_id > 0 && $sub_user_id !== $prev_user_id ) {
+				wp_set_current_user( $sub_user_id );
+			}
+			$rest_request = new \WP_REST_Request( 'GET', $route );
+			foreach ( $params as $k => $v ) {
+				$rest_request->set_param( $k, $v );
+			}
+			if ( is_string( $auth_header ) && '' !== $auth_header ) {
+				$rest_request->set_header( 'Authorization', $auth_header );
+			}
+			$response = rest_do_request( $rest_request );
+			// Restore the original viewer (if we changed it) so the outer
+			// request continues with the correct context — e.g. subsequent
+			// normalize_items() runs against the caller's viewer id.
+			if ( $sub_user_id > 0 && $sub_user_id !== $prev_user_id ) {
+				wp_set_current_user( $prev_user_id );
+			}
+			if ( $response->is_error() ) {
+				return null;
+			}
+			$decoded = $response->get_data();
+			if ( ! is_array( $decoded ) ) {
+				return null;
+			}
+			// Some upstreams wrap items: try common shapes.
+			if ( isset( $decoded['data'] ) && is_array( $decoded['data'] ) ) {
+				return $decoded['data'];
+			}
+			if ( isset( $decoded['items'] ) && is_array( $decoded['items'] ) ) {
+				return $decoded['items'];
+			}
+			return $decoded;
+		}
+
+		$url = home_url( $endpoint );
 		if ( ! empty( $params ) ) {
 			$url = add_query_arg( $params, $url );
 		}
