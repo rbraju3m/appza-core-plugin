@@ -21,6 +21,8 @@ return array(
     'AppzaCore\\Plugin\\Rest\\BuildRequestsController' => $baseDir . '/src/Rest/BuildRequestsController.php',
     'AppzaCore\\Plugin\\Rest\\CustomizationsController' => $baseDir . '/src/Rest/CustomizationsController.php',
     'AppzaCore\\Plugin\\Rest\\FluentCommunityFeedPermissionsFilter' => $baseDir . '/src/Rest/FluentCommunityFeedPermissionsFilter.php',
+    'AppzaCore\\Plugin\\Rest\\FluentCommunityFeedUpdateEnricher' => $baseDir . '/src/Rest/FluentCommunityFeedUpdateEnricher.php',
+    'AppzaCore\\Plugin\\Rest\\FluentCommunityMediaCap' => $baseDir . '/src/Rest/FluentCommunityMediaCap.php',
     'AppzaCore\\Plugin\\Rest\\PreviewProxyController' => $baseDir . '/src/Rest/PreviewProxyController.php',
     'AppzaCore\\Plugin\\Rest\\RestRoutes' => $baseDir . '/src/Rest/RestRoutes.php',
     'AppzaCore\\Plugin\\Rest\\SourceIntegrationsController' => $baseDir . '/src/Rest/SourceIntegrationsController.php',

@@ -36,6 +36,8 @@ class ComposerStaticInitfde03eb503df2cd08e2e0632dc5d8333
         'AppzaCore\\Plugin\\Rest\\BuildRequestsController' => __DIR__ . '/../..' . '/src/Rest/BuildRequestsController.php',
         'AppzaCore\\Plugin\\Rest\\CustomizationsController' => __DIR__ . '/../..' . '/src/Rest/CustomizationsController.php',
         'AppzaCore\\Plugin\\Rest\\FluentCommunityFeedPermissionsFilter' => __DIR__ . '/../..' . '/src/Rest/FluentCommunityFeedPermissionsFilter.php',
+        'AppzaCore\\Plugin\\Rest\\FluentCommunityFeedUpdateEnricher' => __DIR__ . '/../..' . '/src/Rest/FluentCommunityFeedUpdateEnricher.php',
+        'AppzaCore\\Plugin\\Rest\\FluentCommunityMediaCap' => __DIR__ . '/../..' . '/src/Rest/FluentCommunityMediaCap.php',
         'AppzaCore\\Plugin\\Rest\\PreviewProxyController' => __DIR__ . '/../..' . '/src/Rest/PreviewProxyController.php',
         'AppzaCore\\Plugin\\Rest\\RestRoutes' => __DIR__ . '/../..' . '/src/Rest/RestRoutes.php',
         'AppzaCore\\Plugin\\Rest\\SourceIntegrationsController' => __DIR__ . '/../..' . '/src/Rest/SourceIntegrationsController.php',

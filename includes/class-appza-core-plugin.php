@@ -15,6 +15,8 @@ use AppzaCore\Plugin\Repository\RefreshTokenRepository;
 use AppzaCore\Plugin\Rest\AuthMiddleware;
 use AppzaCore\Plugin\Rest\AuthRoutes;
 use AppzaCore\Plugin\Rest\FluentCommunityFeedPermissionsFilter;
+use AppzaCore\Plugin\Rest\FluentCommunityFeedUpdateEnricher;
+use AppzaCore\Plugin\Rest\FluentCommunityMediaCap;
 use AppzaCore\Plugin\Rest\RestRoutes;
 use AppzaCore\Plugin\Schema\SchemaManager;
 
@@ -75,9 +77,28 @@ class Appza_Core_Plugin {
 		// than editing the fcom-mobile plugin so third-party sources
 		// stay untouched.
 		$fcFeedPerms = new FluentCommunityFeedPermissionsFilter();
+		// Lifts FC's max_media_per_post cap (default 4) so posts with
+		// more images survive an edit round-trip. See class docblock
+		// for the exact code path in FC that drops the extras.
+		$fcMediaCap = new FluentCommunityMediaCap();
+		// Enriches every mobile-side feed update payload by appending
+		// `?media_key=<key>` to each media_images URL. Without this,
+		// FC's fragile URL-match-plus-is_active-only fallback drops
+		// images that a prior failed edit left inactive. See class
+		// docblock for the failure chain.
+		$fcFeedUpdateEnricher = new FluentCommunityFeedUpdateEnricher();
 		$this->loader->add_action( 'rest_api_init', $rest, 'register_routes' );
 		$this->loader->add_action( 'rest_api_init', $auth, 'register_routes' );
 		$this->loader->add_action( 'rest_api_init', $fcFeedPerms, 'register_hooks' );
+		// Filter needs to be up whenever FC processes a feed write —
+		// which happens through rest_api_init for the mobile endpoint,
+		// AND through admin-ajax for the FC portal. plugins_loaded is
+		// the earliest common ancestor.
+		$this->loader->add_action( 'plugins_loaded', $fcMediaCap, 'register_hooks' );
+		// rest_pre_dispatch fires per-request, so registering on
+		// rest_api_init (which fires once, right before dispatch) is
+		// the right seam.
+		$this->loader->add_action( 'rest_api_init', $fcFeedUpdateEnricher, 'register_hooks' );
 	}
 
 	protected function define_admin_hooks() {
