@@ -354,6 +354,20 @@ class PreviewProxyController {
 			if ( isset( $item['ctaButtons'] ) && is_array( $item['ctaButtons'] ) ) {
 				$items[ $i ]['ctaButtons'] = $this->normalize_cta_buttons( $item['ctaButtons'] );
 			}
+			// Space cover fallback. `/spaces/all-spaces` returns
+			// cover_photo=null when the space wasn't given a header image;
+			// `/spaces/discover` fills with FC's placeholder. Detect space
+			// items by the shape (privacy + slug present) and substitute the
+			// FC placeholder so fc-space-card renders a visual cover instead
+			// of the "Image" empty-state block.
+			$has_space_shape = isset( $item['privacy'] ) && isset( $item['slug'] );
+			$cover_missing = ! isset( $item['cover_photo'] ) || null === $item['cover_photo'] || '' === $item['cover_photo'];
+			if ( $has_space_shape && $cover_missing ) {
+				$fc_placeholder_file = WP_PLUGIN_DIR . '/fluent-community/assets/images/space-placeholder.jpg';
+				if ( file_exists( $fc_placeholder_file ) ) {
+					$items[ $i ]['cover_photo'] = plugins_url( 'fluent-community/assets/images/space-placeholder.jpg' );
+				}
+			}
 		}
 		// Rewrite media URLs to point at the current request host.
 		// FluentCommunity stores absolute URLs at write time using WP's
