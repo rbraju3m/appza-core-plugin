@@ -92,6 +92,21 @@ class PreviewProxyController {
 		$viewer_id = $this->resolve_viewer_id( $auth_header );
 		$payload = $this->normalize_items( $payload, $viewer_id );
 
+		// fc-spaces-my is by-definition a "joined spaces" list, but the
+		// upstream /spaces payload omits space_pivot. Stamp a synthetic
+		// pivot so the shared fc-space-card visible_when for View Space
+		// (children[10] "space_pivot exists") evaluates true — otherwise
+		// the My tab renders Join CTAs on spaces the viewer already joined.
+		if ( 'fc-spaces-my' === $ds_slug && is_array( $payload ) ) {
+			foreach ( $payload as $i => $item ) {
+				if ( is_array( $item ) && ! isset( $item['space_pivot'] ) ) {
+					$payload[ $i ]['space_pivot'] = array(
+						'status' => 'active',
+					);
+				}
+			}
+		}
+
 		set_transient( $cache_key, $payload, self::CACHE_TTL );
 
 		return rest_ensure_response( $payload );
@@ -566,6 +581,11 @@ class PreviewProxyController {
 				return $this->fixture_fc_welcome_banner();
 			case 'fc-current-user':
 				return $this->fixture_fc_current_user();
+			case 'fc-spaces-all':
+			case 'fc-spaces-discover':
+				return $this->fixture_fc_spaces_all();
+			case 'fc-spaces-my':
+				return $this->fixture_fc_spaces_my();
 			default:
 				return array();
 		}
@@ -744,6 +764,70 @@ class PreviewProxyController {
 						),
 					),
 				),
+			),
+		);
+	}
+
+	/**
+	 * Demo "all spaces" list mirroring the fcom-mobile /spaces/discover
+	 * shape — cover_photo + title + description + members_count +
+	 * privacy + optional space_pivot (present = viewer is a member; the
+	 * renderer switches the CTA + member badge on this). Two entries so
+	 * one card shows the joined state and the other the Join state.
+	 */
+	protected function fixture_fc_spaces_all() {
+		return array(
+			array(
+				'id'                   => 2,
+				'title'                => 'appza',
+				'slug'                 => 'appza',
+				'cover_photo'          => 'https://picsum.photos/seed/appza/800/450',
+				'description'          => 'A Mobile App Builder Inside WordPress',
+				'description_rendered' => '<p>A Mobile App Builder Inside WordPress</p>',
+				'privacy'              => 'public',
+				'members_count'        => 50,
+				'space_pivot'          => array( 'status' => 'active', 'role' => 'admin' ),
+			),
+			array(
+				'id'                   => 3,
+				'title'                => 'lazycoders',
+				'slug'                 => 'lazycoders',
+				'cover_photo'          => 'https://picsum.photos/seed/lazycoders/800/450',
+				'description'          => 'A dynamic startup pioneering native mobile app development.',
+				'description_rendered' => '<p>A dynamic startup pioneering native mobile app development.</p>',
+				'privacy'              => 'private',
+				'members_count'        => 250,
+			),
+		);
+	}
+
+	/**
+	 * Demo "my spaces" list — subset of the discover list where the
+	 * viewer is a member. Handle() stamps space_pivot on this ds_slug
+	 * so all cards render the View Space CTA (children[10] visible_when
+	 * depends on space_pivot exists).
+	 */
+	protected function fixture_fc_spaces_my() {
+		return array(
+			array(
+				'id'                   => 2,
+				'title'                => 'appza',
+				'slug'                 => 'appza',
+				'cover_photo'          => 'https://picsum.photos/seed/appza/800/450',
+				'description'          => 'A Mobile App Builder Inside WordPress',
+				'description_rendered' => '<p>A Mobile App Builder Inside WordPress</p>',
+				'privacy'              => 'public',
+				'members_count'        => 50,
+			),
+			array(
+				'id'                   => 3,
+				'title'                => 'lazycoders',
+				'slug'                 => 'lazycoders',
+				'cover_photo'          => 'https://picsum.photos/seed/lazycoders/800/450',
+				'description'          => 'A dynamic startup pioneering native mobile app development.',
+				'description_rendered' => '<p>A dynamic startup pioneering native mobile app development.</p>',
+				'privacy'              => 'private',
+				'members_count'        => 250,
 			),
 		);
 	}
