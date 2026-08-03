@@ -950,7 +950,12 @@ class PreviewProxyController {
 				'comments'         => array(
 					array(
 						'id'                => 5001,
-						'content_rendered'  => '<p>Love the new topics strip — makes it way easier to jump around.</p>',
+						// Skeleton renders this as text (not HTML), so ship the stripped
+							// plain form. Real FC returns both `content` (plain) and
+							// `content_rendered` (HTML); when the SS binding retargets
+							// to `content` this can carry the HTML again.
+							'content'           => 'Love the new topics strip — makes it way easier to jump around.',
+							'content_rendered'  => 'Love the new topics strip — makes it way easier to jump around.',
 						'xprofile'          => array(
 							'user_id'      => 21,
 							'display_name' => 'Jaime Bosco',
