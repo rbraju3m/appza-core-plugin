@@ -586,6 +586,14 @@ class PreviewProxyController {
 				return $this->fixture_fc_spaces_all();
 			case 'fc-spaces-my':
 				return $this->fixture_fc_spaces_my();
+			case 'fc-space-detail':
+				return $this->fixture_fc_space_detail();
+			case 'fc-space-feeds':
+				return $this->fixture_fc_space_feeds();
+			case 'fc-space-members':
+				return $this->fixture_fc_space_members();
+			case 'fc-space-documents':
+				return $this->fixture_fc_space_documents();
 			default:
 				return array();
 		}
@@ -778,8 +786,19 @@ class PreviewProxyController {
 	protected function fixture_fc_spaces_all() {
 		return array(
 			array(
+				'id'                   => 1,
+				'title'                => 'LazyTasks',
+				'slug'                 => 'lazytasks',
+				'cover_photo'          => 'https://picsum.photos/seed/lazytasks/800/450',
+				'description'          => 'Task management for teams that ship.',
+				'description_rendered' => '<p>Task management for teams that ship.</p>',
+				'privacy'              => 'public',
+				'members_count'        => 128,
+				'space_pivot'          => array( 'status' => 'active', 'role' => 'member' ),
+			),
+			array(
 				'id'                   => 2,
-				'title'                => 'appza',
+				'title'                => 'Appza',
 				'slug'                 => 'appza',
 				'cover_photo'          => 'https://picsum.photos/seed/appza/800/450',
 				'description'          => 'A Mobile App Builder Inside WordPress',
@@ -790,13 +809,353 @@ class PreviewProxyController {
 			),
 			array(
 				'id'                   => 3,
-				'title'                => 'lazycoders',
-				'slug'                 => 'lazycoders',
-				'cover_photo'          => 'https://picsum.photos/seed/lazycoders/800/450',
-				'description'          => 'A dynamic startup pioneering native mobile app development.',
-				'description_rendered' => '<p>A dynamic startup pioneering native mobile app development.</p>',
+				'title'                => 'Woocommerce',
+				'slug'                 => 'woocommerce',
+				'cover_photo'          => 'https://picsum.photos/seed/woocommerce/800/450',
+				'description'          => 'Sell anything with WordPress commerce.',
+				'description_rendered' => '<p>Sell anything with WordPress commerce.</p>',
+				'privacy'              => 'public',
+				'members_count'        => 342,
+			),
+			array(
+				'id'                   => 4,
+				'title'                => 'TutorLMS',
+				'slug'                 => 'tutorlms',
+				'cover_photo'          => 'https://picsum.photos/seed/tutorlms/800/450',
+				'description'          => 'Course creation + student community.',
+				'description_rendered' => '<p>Course creation + student community.</p>',
 				'privacy'              => 'private',
-				'members_count'        => 250,
+				'members_count'        => 187,
+			),
+		);
+	}
+
+	/**
+	 * Demo Space Details header + settings for the "Appza Community" space
+	 * (id=2, slug=appza). Includes topics so the "Choose topic" strip has
+	 * content, permissions so composer + Members visibility gate correctly,
+	 * and membership pivot so the joined-state UI paints.
+	 */
+	protected function fixture_fc_space_detail() {
+		return array(
+			array(
+				'id'                   => 2,
+				'slug'                 => 'appza',
+				'title'                => 'Appza Community',
+				'cover_photo'          => 'https://picsum.photos/seed/appza/1200/500',
+				'description'          => 'A Mobile App Builder Inside WordPress',
+				'description_rendered' => '<p>A Mobile App Builder Inside WordPress — discuss design, dev, business, research.</p>',
+				'type'                 => 'community',
+				'privacy'              => 'public',
+				'status'               => 'published',
+				'members_count'        => 50,
+				'settings'             => array(
+					'topic_required'        => 'yes',
+					'layout_style'          => 'timeline',
+					'disable_post_sort_by'  => 'no',
+					'default_post_sort_by'  => 'latest',
+					'shape_svg_id'          => null,
+				),
+				'permissions'          => array(
+					'can_create_post'   => true,
+					'can_view_members'  => true,
+					'can_manage_space'  => false,
+					'can_join'          => true,
+					'can_leave'         => true,
+				),
+				'topics'               => array(
+					array(
+						'id'          => 11,
+						'title'       => 'Design',
+						'description' => 'UI, UX, brand',
+						'slug'        => 'design',
+						'admin_only'  => 'no',
+						'space_ids'   => array( 2 ),
+					),
+					array(
+						'id'          => 12,
+						'title'       => 'Development',
+						'description' => 'Engineering + tooling',
+						'slug'        => 'development',
+						'admin_only'  => 'no',
+						'space_ids'   => array( 2 ),
+					),
+					array(
+						'id'          => 13,
+						'title'       => 'Business',
+						'description' => 'Sales, marketing, ops',
+						'slug'        => 'business',
+						'admin_only'  => 'no',
+						'space_ids'   => array( 2 ),
+					),
+					array(
+						'id'          => 14,
+						'title'       => 'Research',
+						'description' => 'User research + insights',
+						'slug'        => 'research',
+						'admin_only'  => 'no',
+						'space_ids'   => array( 2 ),
+					),
+				),
+				'header_links'         => array(
+					array( 'title' => 'About',      'route' => 'about' ),
+					array( 'title' => 'Guidelines', 'route' => 'guidelines' ),
+				),
+				'membership'           => array(
+					'pivot' => array(
+						'status' => 'active',
+						'role'   => 'admin',
+					),
+				),
+				'space_pivot'          => array( 'status' => 'active', 'role' => 'admin' ),
+			),
+		);
+	}
+
+	/**
+	 * Demo feed for the Space Details FEEDS tab. First post carries a
+	 * Development topic term + featured image + one comment so the design
+	 * mock (topic pill + hero + inline first-comment preview) has real
+	 * data. Later posts are minimal.
+	 */
+	protected function fixture_fc_space_feeds() {
+		$now = time();
+		return array(
+			array(
+				'id'               => 101,
+				'slug'             => 'appza-shipping-space-details',
+				'title'            => 'Shipping the new Space Details screen',
+				'message_rendered' => '<p>We just landed the redesigned Space Details screen — topics strip, sticky tabs, and a cleaner post composer. Let us know what you think!</p>',
+				'featured_image'   => 'https://picsum.photos/seed/appza-post-101/800/450',
+				'created_at'       => gmdate( 'Y-m-d H:i:s', $now - 45 * 60 ),
+				'privacy'          => 'public',
+				'type'             => 'post',
+				'content_type'     => 'text',
+				'space_id'         => 2,
+				'user_id'          => 12,
+				'status'           => 'published',
+				'is_sticky'        => 0,
+				'comments_count'   => 1,
+				'reactions_count'  => 24,
+				'permalink'        => 'https://appza-legacy.test/space/appza/post/101',
+				'xprofile'         => array(
+					'user_id'      => 12,
+					'display_name' => 'Syed Khan',
+					'username'     => 'syed',
+					'avatar'       => 'https://i.pravatar.cc/80?img=12',
+					'is_verified'  => true,
+					'badge'        => 'Admin',
+					'permalink'    => 'https://appza-legacy.test/u/syed',
+				),
+				'comments'         => array(
+					array(
+						'id'                => 5001,
+						'content_rendered'  => '<p>Love the new topics strip — makes it way easier to jump around.</p>',
+						'xprofile'          => array(
+							'user_id'      => 21,
+							'display_name' => 'Jaime Bosco',
+							'username'     => 'jaime',
+							'avatar'       => 'https://i.pravatar.cc/80?img=15',
+						),
+						'created_at'        => gmdate( 'Y-m-d H:i:s', $now - 30 * 60 ),
+						'reactions_count'   => 3,
+						'replies_count'     => 0,
+					),
+				),
+				'space'            => array(
+					'id'       => 2,
+					'title'    => 'Appza Community',
+					'slug'     => 'appza',
+					'settings' => array( 'layout_style' => 'timeline' ),
+				),
+				'reactions'        => array(),
+				'terms'            => array(
+					array(
+						'title' => 'Development',
+						'slug'  => 'development',
+						'pivot' => array( 'post_id' => 101, 'term_id' => 12 ),
+					),
+				),
+				'permissions'      => array(
+					'is_author'  => false,
+					'can_edit'   => false,
+					'can_delete' => false,
+				),
+			),
+			array(
+				'id'               => 102,
+				'slug'             => 'weekly-standup-notes',
+				'title'            => 'Weekly standup notes',
+				'message_rendered' => '<p>Quick recap from this week: roadmap for the mobile builder, plus new topic filters. Full notes in the thread.</p>',
+				'featured_image'   => null,
+				'created_at'       => gmdate( 'Y-m-d H:i:s', $now - 6 * 3600 ),
+				'privacy'          => 'public',
+				'type'             => 'post',
+				'content_type'     => 'text',
+				'space_id'         => 2,
+				'user_id'          => 21,
+				'status'           => 'published',
+				'is_sticky'        => 0,
+				'comments_count'   => 0,
+				'reactions_count'  => 8,
+				'permalink'        => 'https://appza-legacy.test/space/appza/post/102',
+				'xprofile'         => array(
+					'user_id'      => 21,
+					'display_name' => 'Jaime Bosco',
+					'username'     => 'jaime',
+					'avatar'       => 'https://i.pravatar.cc/80?img=15',
+					'is_verified'  => false,
+					'badge'        => null,
+					'permalink'    => 'https://appza-legacy.test/u/jaime',
+				),
+				'comments'         => array(),
+				'space'            => array(
+					'id'       => 2,
+					'title'    => 'Appza Community',
+					'slug'     => 'appza',
+					'settings' => array( 'layout_style' => 'timeline' ),
+				),
+				'reactions'        => array(),
+				'terms'            => array(
+					array(
+						'title' => 'Business',
+						'slug'  => 'business',
+						'pivot' => array( 'post_id' => 102, 'term_id' => 13 ),
+					),
+				),
+				'permissions'      => array(
+					'is_author'  => false,
+					'can_edit'   => false,
+					'can_delete' => false,
+				),
+			),
+			array(
+				'id'               => 103,
+				'slug'             => 'welcome-new-members',
+				'title'            => 'Welcome new members',
+				'message_rendered' => '<p>Big welcome to everyone who joined this week. Introduce yourselves in the thread!</p>',
+				'featured_image'   => null,
+				'created_at'       => gmdate( 'Y-m-d H:i:s', $now - 2 * 86400 ),
+				'privacy'          => 'public',
+				'type'             => 'post',
+				'content_type'     => 'text',
+				'space_id'         => 2,
+				'user_id'          => 12,
+				'status'           => 'published',
+				'is_sticky'        => 1,
+				'comments_count'   => 0,
+				'reactions_count'  => 42,
+				'permalink'        => 'https://appza-legacy.test/space/appza/post/103',
+				'xprofile'         => array(
+					'user_id'      => 12,
+					'display_name' => 'Syed Khan',
+					'username'     => 'syed',
+					'avatar'       => 'https://i.pravatar.cc/80?img=12',
+					'is_verified'  => true,
+					'badge'        => 'Admin',
+					'permalink'    => 'https://appza-legacy.test/u/syed',
+				),
+				'comments'         => array(),
+				'space'            => array(
+					'id'       => 2,
+					'title'    => 'Appza Community',
+					'slug'     => 'appza',
+					'settings' => array( 'layout_style' => 'timeline' ),
+				),
+				'reactions'        => array(),
+				'terms'            => array(),
+				'permissions'      => array(
+					'is_author'  => false,
+					'can_edit'   => false,
+					'can_delete' => false,
+				),
+			),
+		);
+	}
+
+	/**
+	 * Placeholder MEMBERS-tab data. This arc renders a placeholder screen
+	 * for the tab; a minimal fixture is enough to prove the DS wiring.
+	 */
+	protected function fixture_fc_space_members() {
+		return array(
+			array(
+				'user_id'           => 12,
+				'display_name'      => 'Syed Khan',
+				'username'          => 'syed',
+				'avatar'            => 'https://i.pravatar.cc/80?img=12',
+				'short_description' => 'Admin · Appza founder',
+				'badge'             => 'Admin',
+				'xprofile'          => array(
+					'user_id'      => 12,
+					'display_name' => 'Syed Khan',
+					'username'     => 'syed',
+					'avatar'       => 'https://i.pravatar.cc/80?img=12',
+				),
+			),
+			array(
+				'user_id'           => 21,
+				'display_name'      => 'Jaime Bosco',
+				'username'          => 'jaime',
+				'avatar'            => 'https://i.pravatar.cc/80?img=15',
+				'short_description' => 'Community moderator',
+				'badge'             => 'Moderator',
+				'xprofile'          => array(
+					'user_id'      => 21,
+					'display_name' => 'Jaime Bosco',
+					'username'     => 'jaime',
+					'avatar'       => 'https://i.pravatar.cc/80?img=15',
+				),
+			),
+			array(
+				'user_id'           => 34,
+				'display_name'      => 'Ada Lovelace',
+				'username'          => 'ada',
+				'avatar'            => 'https://i.pravatar.cc/80?img=45',
+				'short_description' => 'Engineer',
+				'badge'             => null,
+				'xprofile'          => array(
+					'user_id'      => 34,
+					'display_name' => 'Ada Lovelace',
+					'username'     => 'ada',
+					'avatar'       => 'https://i.pravatar.cc/80?img=45',
+				),
+			),
+		);
+	}
+
+	/**
+	 * Placeholder DOCUMENTS-tab data — this arc renders a placeholder
+	 * screen for the tab; a minimal fixture is enough to prove wiring.
+	 */
+	protected function fixture_fc_space_documents() {
+		$now = time();
+		return array(
+			array(
+				'id'         => 901,
+				'title'      => 'Onboarding Guide.pdf',
+				'file_url'   => 'https://picsum.photos/seed/appza-doc-901/600/800',
+				'file_type'  => 'pdf',
+				'size'       => 245678,
+				'created_at' => gmdate( 'Y-m-d H:i:s', $now - 3 * 86400 ),
+				'uploader'   => array(
+					'user_id'      => 12,
+					'display_name' => 'Syed Khan',
+					'avatar'       => 'https://i.pravatar.cc/80?img=12',
+				),
+			),
+			array(
+				'id'         => 902,
+				'title'      => 'Brand Assets.zip',
+				'file_url'   => 'https://picsum.photos/seed/appza-doc-902/600/800',
+				'file_type'  => 'zip',
+				'size'       => 1287654,
+				'created_at' => gmdate( 'Y-m-d H:i:s', $now - 10 * 86400 ),
+				'uploader'   => array(
+					'user_id'      => 21,
+					'display_name' => 'Jaime Bosco',
+					'avatar'       => 'https://i.pravatar.cc/80?img=15',
+				),
 			),
 		);
 	}
