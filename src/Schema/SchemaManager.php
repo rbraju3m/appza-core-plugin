@@ -16,13 +16,15 @@ class SchemaManager {
 	// Bumped to 2 with the wp_appza_customizations addition (Phase 1B.5a).
 	// Bumped to 3 with the wp_appza_refresh_tokens addition (Phase 1B.6 chunk 2).
 	// Bumped to 4: appzet_primitive scope added to customizations ENUM (DC#20).
-	const DB_VERSION = '4';
+	// Bumped to 5: wp_appza_space_config added for per-space runtime overrides.
+	const DB_VERSION = '5';
 
 	public static function install() {
 		CatalogSnapshotSchema::install();
 		CatalogMetaSchema::install();
 		CustomizationSchema::install();
 		RefreshTokenSchema::install();
+		SpaceConfigSchema::install();
 		update_option( 'appza_core_db_version', self::DB_VERSION, false );
 	}
 
@@ -31,5 +33,6 @@ class SchemaManager {
 		CatalogMetaSchema::drop();
 		CustomizationSchema::drop();
 		RefreshTokenSchema::drop();
+		SpaceConfigSchema::drop();
 	}
 }

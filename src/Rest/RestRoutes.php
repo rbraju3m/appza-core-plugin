@@ -24,6 +24,7 @@ class RestRoutes {
 		$active_sources = new ActiveSourceIntegrationsController();
 		$templates_list = new TemplatesController();
 		$build_requests = new BuildRequestsController();
+		$space_config   = new SpaceConfigController();
 
 		register_rest_route(
 			APPZA_CORE_REST_NAMESPACE,
@@ -145,6 +146,36 @@ class RestRoutes {
 					'template_slug'           => array( 'required' => true, 'type' => 'string' ),
 					'base_url_mode'           => array( 'required' => true, 'type' => 'string' ),
 					'custom_base_url'         => array( 'type' => 'string' ),
+				),
+			)
+		);
+
+		// Space Config editor endpoints. Admin-only (manage_options).
+		// list_all returns FC spaces + all stored configs so the editor
+		// can render a single-page picker + form. get_one/save handle
+		// per-slug retrieval + upsert. See SpaceConfigController.
+		register_rest_route(
+			APPZA_CORE_REST_NAMESPACE,
+			'/space-config',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => array( $space_config, 'list_all' ),
+				'permission_callback' => array( $space_config, 'permission_check' ),
+			)
+		);
+		register_rest_route(
+			APPZA_CORE_REST_NAMESPACE,
+			'/space-config/(?P<slug>[a-zA-Z0-9\-_]+)',
+			array(
+				array(
+					'methods'             => \WP_REST_Server::READABLE,
+					'callback'            => array( $space_config, 'get_one' ),
+					'permission_callback' => array( $space_config, 'permission_check' ),
+				),
+				array(
+					'methods'             => \WP_REST_Server::CREATABLE,
+					'callback'            => array( $space_config, 'save' ),
+					'permission_callback' => array( $space_config, 'permission_check' ),
 				),
 			)
 		);

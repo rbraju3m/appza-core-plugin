@@ -26,9 +26,10 @@ if ( ! defined( 'WPINC' ) ) {
 
 class AdminMenu {
 
-	const SLUG       = 'appza-core';
-	const SLUG_SYNC  = 'appza-core-sync';
-	const CAPABILITY = 'manage_options';
+	const SLUG              = 'appza-core';
+	const SLUG_SYNC         = 'appza-core-sync';
+	const SLUG_SPACE_CONFIG = 'appza-core-space-config';
+	const CAPABILITY        = 'manage_options';
 
 	public function register_menu() {
 		add_menu_page(
@@ -60,6 +61,12 @@ class AdminMenu {
 			self::SLUG_SYNC,
 			array( $this, 'render_sync' )
 		);
+
+		// Space Config admin page intentionally not registered — the
+		// right-panel Properties in the App simulator carry all AppZet
+		// knobs (uniformly per-template). Keep render_space_config +
+		// REST endpoint below for programmatic per-space overrides
+		// (wp_appza_space_config table still consumed by the enricher).
 	}
 
 	public function render_app() {
@@ -88,5 +95,22 @@ class AdminMenu {
 		$core_api_url       = APPZA_CORE_API_URL;
 
 		require APPZA_CORE_PLUGIN_DIR . 'admin/views/dashboard.php';
+	}
+
+	public function render_space_config() {
+		if ( ! current_user_can( self::CAPABILITY ) ) {
+			wp_die( __( 'You do not have permission to access this page.', 'appza-core' ) );
+		}
+
+		$repo    = new \AppzaCore\Plugin\Repository\SpaceConfigRepository();
+		$spaces  = $repo->list_spaces();
+		$configs = array();
+		foreach ( $repo->all() as $row ) {
+			$configs[ $row['space_slug'] ] = $row['config'];
+		}
+		$rest_root = rest_url( APPZA_CORE_REST_NAMESPACE . '/space-config' );
+		$nonce     = wp_create_nonce( 'wp_rest' );
+
+		require APPZA_CORE_PLUGIN_DIR . 'admin/views/space-config.php';
 	}
 }

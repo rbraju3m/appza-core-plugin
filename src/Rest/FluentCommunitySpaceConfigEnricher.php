@@ -1,0 +1,173 @@
+<?php
+/**
+ * Attaches a per-space `appza_config` blob to the fcom-mobile
+ * `/spaces/by/slug` response so the mobile renderer can apply
+ * per-space overrides for switcher / subtabs / cover / topics
+ * on the Space Detail screen.
+ *
+ * Config source: wp_appza_space_config table (SpaceConfigSchema).
+ * Rows are keyed by space slug; the config_json blob is JSON-decoded
+ * and merged onto response items[].appza_config.
+ *
+ * Hooks on `rest_request_after_callbacks` (not `rest_post_dispatch`)
+ * so the enrichment fires for both the outer serve_request AND the
+ * internal rest_do_request calls the WP-admin simulator makes via
+ * PreviewProxyController.
+ *
+ * ---------------------------------------------------------------------
+ * appza_config schema (all keys optional; missing = renderer defaults)
+ * ---------------------------------------------------------------------
+ *
+ * {
+ *   "switcher": {
+ *     "hidden":            bool,            // hide the whole switcher strip
+ *     "spaces_whitelist":  ["slug","slug"], // only these spaces appear;
+ *                                           //   missing = show every one.
+ *                                           //   Renamed to avoid clashing
+ *                                           //   with the mirrored `spaces`
+ *                                           //   prop that carries the full
+ *                                           //   entry objects.
+ *     "_style": {                           // stamped as CSS custom props
+ *       "gap":              "8px",
+ *       "chip_radius":      "16px",
+ *       "chip_bg_color":    "#f2f2f2",
+ *       "chip_text_color":  "#111",
+ *       "active_bg_color":  "#2563eb",
+ *       "active_text_color":"#ffffff"
+ *     }
+ *   },
+ *
+ *   "subtabs": [                             // FULL replace; if present,
+ *     {                                      //   the entire tab list is this
+ *       "value":         "posts",            //   array (order preserved).
+ *       "label":         "POSTS",
+ *       "hidden":        false,              // hide this row w/o removing
+ *       "icon":          "chatbox-outline",  // Ionicon name (optional)
+ *       "target_screen": "custom-screen"     // if set, tap does nav.push to
+ *                                            //   this screen instead of the
+ *                                            //   default set_subtab dispatch.
+ *     }
+ *   ],
+ *
+ *   "topics": {
+ *     "topic_order":    ["dev","design"],   // reorder chips; unlisted topics
+ *                                           //   keep source order behind these
+ *     "hidden_topics":  ["business"],       // drop these topic slugs
+ *     "section_header": "Filter by",
+ *     "all_label":      "All",
+ *     "prepend_all":    true,
+ *     "_style": {
+ *       "gap":                 "6px",
+ *       "chip_radius":         "12px",
+ *       "active_border_color": "#2563eb",
+ *       "font_weight":         "500"
+ *     }
+ *   },
+ *
+ *   "cover": {
+ *     "hidden":           bool,
+ *     "height":           "220px",
+ *     "aspect_ratio":     "16 / 9",
+ *     "overlay_title":    "Welcome to LazyCoders",
+ *     "overlay_gradient": "linear-gradient(180deg, transparent, rgba(0,0,0,0.6))"
+ *   }
+ * }
+ *
+ * Directive keys handled by the mobile renderer (PlacementRenderer):
+ *   - `hidden`            → placement is skipped entirely
+ *   - `spaces_whitelist`  → filter mirrored `spaces` prop by these slugs
+ *   - `hidden_topics`     → drop matching entries from mirrored `topics`
+ *   - `topic_order`       → reorder mirrored `topics` by this list
+ *   - `_style`            → CSS custom props stamped onto the wrapper
+ *   - `overlay_title`     → text overlay child on the cover image
+ *   - `overlay_gradient`  → gradient overlay on the cover image
+ * Everything else is treated as a raw prop override merged onto
+ * default_props_override (section_header, all_label, height, ...).
+ */
+
+namespace AppzaCore\Plugin\Rest;
+
+use AppzaCore\Plugin\Schema\SpaceConfigSchema;
+
+if ( ! defined( 'WPINC' ) ) {
+	die;
+}
+
+class FluentCommunitySpaceConfigEnricher {
+
+	const ROUTE = '/fcom-mobile/api/v1/spaces/by/slug';
+
+	public function register_hooks() {
+		add_filter( 'rest_request_after_callbacks', [ $this, 'attach_config' ], 10, 3 );
+	}
+
+	/**
+	 * @param \WP_REST_Response|\WP_HTTP_Response|\WP_Error|mixed $response
+	 * @param array                                              $handler
+	 * @param \WP_REST_Request                                   $request
+	 */
+	public function attach_config( $response, $handler, $request ) {
+		if ( ! $response instanceof \WP_REST_Response ) {
+			return $response;
+		}
+		if ( (string) $request->get_route() !== self::ROUTE ) {
+			return $response;
+		}
+		$data = $response->get_data();
+		if ( ! is_array( $data ) || ! isset( $data['items'] ) ) {
+			return $response;
+		}
+		$items = $data['items'];
+
+		// fcom-mobile's /spaces/by/slug wraps the space row inside
+		// items.space (a single-key associative wrapper the mobile
+		// dataFetch layer unwraps on the client). Enrich the wrapped
+		// space row directly so appza_config lands at items[0].appza_config
+		// after the client unwrap. Also handle the plain single-row and
+		// list shapes for future callers of this filter.
+		if ( is_array( $items ) && isset( $items['space'] ) && is_array( $items['space'] ) ) {
+			$items['space'] = $this->enrich_row( $items['space'] );
+		} elseif ( is_array( $items ) && ! empty( $items ) && is_int( array_key_first( $items ) ) ) {
+			foreach ( $items as $i => $row ) {
+				if ( is_array( $row ) ) {
+					$items[ $i ] = $this->enrich_row( $row );
+				}
+			}
+		} elseif ( is_array( $items ) ) {
+			$items = $this->enrich_row( $items );
+		}
+
+		$data['items'] = $items;
+		$response->set_data( $data );
+
+		return $response;
+	}
+
+	protected function enrich_row( array $row ) {
+		$slug = isset( $row['slug'] ) && is_string( $row['slug'] ) ? $row['slug'] : '';
+		if ( $slug === '' ) {
+			return $row;
+		}
+		$config = $this->get_config( $slug );
+		// Always set the key (empty object → renderer treats as "no
+		// overrides"), so the shape is predictable client-side.
+		$row['appza_config'] = $config ?: new \stdClass();
+		return $row;
+	}
+
+	/**
+	 * @return array<string, mixed>|null
+	 */
+	protected function get_config( string $slug ) {
+		global $wpdb;
+		$table = SpaceConfigSchema::table_name();
+		$json  = $wpdb->get_var(
+			$wpdb->prepare( "SELECT config_json FROM {$table} WHERE space_slug = %s LIMIT 1", $slug )
+		);
+		if ( ! is_string( $json ) || $json === '' ) {
+			return null;
+		}
+		$decoded = json_decode( $json, true );
+		return is_array( $decoded ) ? $decoded : null;
+	}
+}

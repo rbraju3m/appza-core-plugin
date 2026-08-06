@@ -17,6 +17,7 @@ use AppzaCore\Plugin\Rest\AuthRoutes;
 use AppzaCore\Plugin\Rest\FluentCommunityFeedPermissionsFilter;
 use AppzaCore\Plugin\Rest\FluentCommunityFeedUpdateEnricher;
 use AppzaCore\Plugin\Rest\FluentCommunityMediaCap;
+use AppzaCore\Plugin\Rest\FluentCommunitySpaceConfigEnricher;
 use AppzaCore\Plugin\Rest\RestRoutes;
 use AppzaCore\Plugin\Schema\SchemaManager;
 
@@ -87,9 +88,15 @@ class Appza_Core_Plugin {
 		// images that a prior failed edit left inactive. See class
 		// docblock for the failure chain.
 		$fcFeedUpdateEnricher = new FluentCommunityFeedUpdateEnricher();
+		// Attaches per-space `appza_config` blob onto fcom-mobile's
+		// /spaces/by/slug response. Read from wp_appza_space_config.
+		// Powers per-space renderer overrides (switcher / subtabs /
+		// cover / topics) without editing the fcom-mobile plug-in.
+		$fcSpaceConfig = new FluentCommunitySpaceConfigEnricher();
 		$this->loader->add_action( 'rest_api_init', $rest, 'register_routes' );
 		$this->loader->add_action( 'rest_api_init', $auth, 'register_routes' );
 		$this->loader->add_action( 'rest_api_init', $fcFeedPerms, 'register_hooks' );
+		$this->loader->add_action( 'rest_api_init', $fcSpaceConfig, 'register_hooks' );
 		// Filter needs to be up whenever FC processes a feed write —
 		// which happens through rest_api_init for the mobile endpoint,
 		// AND through admin-ajax for the FC portal. plugins_loaded is
