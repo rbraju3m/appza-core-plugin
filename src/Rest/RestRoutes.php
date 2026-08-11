@@ -180,6 +180,29 @@ class RestRoutes {
 			)
 		);
 
+		// User search for the Add Member modal. Registered under the
+		// fcom-mobile namespace (not appza/v1) because the mobile
+		// catalog's fc-users-search DataSource always calls it via
+		// the fcom-mobile prefix. WordPress does not gate
+		// register_rest_route by which plugin owns the namespace,
+		// and per project policy we never edit the fcom-mobile
+		// plugin itself.
+		$users_search = new FluentCommunityUsersSearchController();
+		register_rest_route(
+			'fcom-mobile/api/v1',
+			'/users/search',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => array( $users_search, 'handle' ),
+				'permission_callback' => array( $users_search, 'permission_check' ),
+				'args'                => array(
+					'search'     => array( 'type' => 'string' ),
+					'space_slug' => array( 'type' => 'string' ),
+					'per_page'   => array( 'type' => 'integer' ),
+				),
+			)
+		);
+
 		register_rest_route(
 			APPZA_CORE_REST_NAMESPACE,
 			'/preview/data',

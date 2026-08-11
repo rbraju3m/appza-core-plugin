@@ -25,6 +25,7 @@ return array(
     'AppzaCore\\Plugin\\Rest\\FluentCommunityFeedUpdateEnricher' => $baseDir . '/src/Rest/FluentCommunityFeedUpdateEnricher.php',
     'AppzaCore\\Plugin\\Rest\\FluentCommunityMediaCap' => $baseDir . '/src/Rest/FluentCommunityMediaCap.php',
     'AppzaCore\\Plugin\\Rest\\FluentCommunitySpaceConfigEnricher' => $baseDir . '/src/Rest/FluentCommunitySpaceConfigEnricher.php',
+    'AppzaCore\\Plugin\\Rest\\FluentCommunityUsersSearchController' => $baseDir . '/src/Rest/FluentCommunityUsersSearchController.php',
     'AppzaCore\\Plugin\\Rest\\PreviewProxyController' => $baseDir . '/src/Rest/PreviewProxyController.php',
     'AppzaCore\\Plugin\\Rest\\RestRoutes' => $baseDir . '/src/Rest/RestRoutes.php',
     'AppzaCore\\Plugin\\Rest\\SourceIntegrationsController' => $baseDir . '/src/Rest/SourceIntegrationsController.php',
