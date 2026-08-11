@@ -210,16 +210,37 @@ class PreviewProxyController {
 				wp_set_current_user( $sub_user_id );
 			}
 			$rest_request = new \WP_REST_Request( 'GET', $route );
+			// Set as BOTH query params + generic params so downstream
+			// handlers can read via either get_query_params() or get_params().
 			foreach ( $params as $k => $v ) {
 				$rest_request->set_param( $k, $v );
+			}
+			$rest_request->set_query_params( $params );
+			// FluentCommunity's Model::getPerPage() reads $_REQUEST['per_page']
+			// directly — it bypasses the WP_REST_Request. Same story for its
+			// SpaceController's search / status / sort switches on some
+			// endpoints. Inject the forwarded params into $_REQUEST/$_GET for
+			// the duration of the sub-request so paginate() honors what the
+			// client actually asked for (else it silently caps at 15/page).
+			// Restore afterward so the outer request isn't polluted.
+			$prev_request_super = $_REQUEST;
+			$prev_get_super     = $_GET;
+			foreach ( $params as $k => $v ) {
+				$scalar = is_scalar( $v ) ? (string) $v : ( is_array( $v ) ? $v : null );
+				if ( $scalar === null ) {
+					continue;
+				}
+				$_REQUEST[ $k ] = $scalar;
+				$_GET[ $k ]     = $scalar;
 			}
 			if ( is_string( $auth_header ) && '' !== $auth_header ) {
 				$rest_request->set_header( 'Authorization', $auth_header );
 			}
 			$response = rest_do_request( $rest_request );
-			// Restore the original viewer (if we changed it) so the outer
-			// request continues with the correct context — e.g. subsequent
-			// normalize_items() runs against the caller's viewer id.
+			// Restore superglobals + viewer so nothing downstream of this
+			// sub-request sees the forged state.
+			$_REQUEST = $prev_request_super;
+			$_GET     = $prev_get_super;
 			if ( $sub_user_id > 0 && $sub_user_id !== $prev_user_id ) {
 				wp_set_current_user( $prev_user_id );
 			}

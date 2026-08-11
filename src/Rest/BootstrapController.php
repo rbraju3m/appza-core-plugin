@@ -134,6 +134,34 @@ class BootstrapController {
 			'source_integration_slug' => $source_integration_slug,
 			'locale_default'          => get_locale(),
 			'auth'                    => null,
+			'fluent_community'        => $this->fluent_community_settings(),
+		);
+	}
+
+	/**
+	 * Surface the FluentCommunity customization settings the mobile
+	 * renderer honors so the app matches whatever the site admin picked
+	 * in Settings → Customization. Currently just member_list_layout
+	 * (classic = list, grid = tile grid); more entries can join here
+	 * (rich_post_layout, default_feed_layout, etc.) as the renderer
+	 * gains support for them.
+	 *
+	 * Returns null when FluentCommunity isn't installed so the mobile
+	 * bootstrap loader can distinguish "no FC on this site" from
+	 * "FC present with default settings".
+	 *
+	 * @return array<string, string>|null
+	 */
+	protected function fluent_community_settings() {
+		if ( ! class_exists( '\\FluentCommunity\\App\\Functions\\Utility' ) ) {
+			return null;
+		}
+
+		$layout = \FluentCommunity\App\Functions\Utility::getCustomizationSetting( 'member_list_layout' );
+		$layout = in_array( $layout, array( 'classic', 'grid' ), true ) ? $layout : 'classic';
+
+		return array(
+			'member_list_layout' => $layout,
 		);
 	}
 }
