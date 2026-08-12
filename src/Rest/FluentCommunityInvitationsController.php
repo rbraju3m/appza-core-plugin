@@ -338,14 +338,17 @@ class FluentCommunityInvitationsController {
 			? sprintf( '%s(%s)', (string) ( $meta['title'] ?? '' ), __( 'Invitation Link', 'appza-core' ) )
 			: trim( sprintf( '%s <%s>', (string) ( $meta['invitee_name'] ?? '' ), (string) $row->message ) );
 
-		// Mirrors FluentCommunity's Invitation::isValid() exactly, which
-		// is what the portal gates its Copy Link control on: an email
-		// invite is usable while pending, a link invite while active.
-		// A spent or lapsed link has already been flipped to expired
-		// above, so it drops out here.
+		// Usable per FluentCommunity's Invitation::isValid(): an email
+		// invite while pending, a link invite while active.
 		$is_valid = $is_link ? ( $status === 'active' ) : ( $status === 'pending' );
 
-		$access_url = $is_valid
+		// Expired invitations keep their Copy Link, per the design. The
+		// URL still exists — FluentCommunity's accept flow is what
+		// rejects it on use — so this is wider than the web portal,
+		// which hides the control once an invitation lapses.
+		$can_copy = $is_valid || $status === 'expired';
+
+		$access_url = $can_copy
 			? $this->access_url( (string) $row->message_rendered )
 			: '';
 
