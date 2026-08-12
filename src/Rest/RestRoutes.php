@@ -180,6 +180,72 @@ class RestRoutes {
 			)
 		);
 
+		// Space invitations for the Invite User modal. Same namespace
+		// rationale as /users/search below — fcom-mobile ships no
+		// invitation endpoints of its own and is third-party, so we
+		// add ours to its namespace rather than editing it (P68).
+		$invitations = new FluentCommunityInvitationsController();
+		register_rest_route(
+			'fcom-mobile/api/v1',
+			'/spaces/invitations',
+			array(
+				array(
+					'methods'             => \WP_REST_Server::READABLE,
+					'callback'            => array( $invitations, 'index' ),
+					'permission_callback' => array( $invitations, 'permission_check' ),
+					'args'                => array(
+						'space_slug' => array( 'type' => 'string' ),
+						'status'     => array( 'type' => 'string' ),
+						'page'       => array( 'type' => 'integer' ),
+						'per_page'   => array( 'type' => 'integer' ),
+					),
+				),
+				array(
+					'methods'             => \WP_REST_Server::CREATABLE,
+					'callback'            => array( $invitations, 'store' ),
+					'permission_callback' => array( $invitations, 'permission_check' ),
+					'args'                => array(
+						'space_slug'   => array( 'type' => 'string', 'required' => true ),
+						'email'        => array( 'type' => 'string', 'required' => true ),
+						'invitee_name' => array( 'type' => 'string' ),
+						'role'         => array( 'type' => 'string' ),
+					),
+				),
+			)
+		);
+
+		// Delete + resend are POST (not DELETE) to stay consistent
+		// with the other write routes the catalog wires — every
+		// fcom-mobile space mutation (add-member, remove-member) is a
+		// POST, so the renderer's HTTP action needs no special case.
+		register_rest_route(
+			'fcom-mobile/api/v1',
+			'/spaces/invitations/delete',
+			array(
+				'methods'             => \WP_REST_Server::CREATABLE,
+				'callback'            => array( $invitations, 'destroy' ),
+				'permission_callback' => array( $invitations, 'permission_check' ),
+				'args'                => array(
+					'invitation_id' => array( 'type' => 'integer', 'required' => true ),
+					'space_slug'    => array( 'type' => 'string' ),
+				),
+			)
+		);
+
+		register_rest_route(
+			'fcom-mobile/api/v1',
+			'/spaces/invitations/resend',
+			array(
+				'methods'             => \WP_REST_Server::CREATABLE,
+				'callback'            => array( $invitations, 'resend' ),
+				'permission_callback' => array( $invitations, 'permission_check' ),
+				'args'                => array(
+					'invitation_id' => array( 'type' => 'integer', 'required' => true ),
+					'space_slug'    => array( 'type' => 'string' ),
+				),
+			)
+		);
+
 		// User search for the Add Member modal. Registered under the
 		// fcom-mobile namespace (not appza/v1) because the mobile
 		// catalog's fc-users-search DataSource always calls it via
