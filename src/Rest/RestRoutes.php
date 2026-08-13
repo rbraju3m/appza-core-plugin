@@ -246,6 +246,29 @@ class RestRoutes {
 			)
 		);
 
+		// Space documents for the DOCUMENTS sub-tab. fcom-mobile does
+		// ship /documents, but it wants a numeric space_id (the mobile
+		// side only knows slugs) and returns feeds whose file list is
+		// a creation-time snapshot — the filename the design shows can
+		// be stale there. Ours takes a slug and re-derives files from
+		// the live Media rows. Same namespace rationale as above.
+		$documents = new FluentCommunityDocumentsController();
+		register_rest_route(
+			'fcom-mobile/api/v1',
+			'/spaces/documents',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => array( $documents, 'index' ),
+				'permission_callback' => array( $documents, 'permission_check' ),
+				'args'                => array(
+					'space_slug' => array( 'type' => 'string' ),
+					'search'     => array( 'type' => 'string' ),
+					'page'       => array( 'type' => 'integer' ),
+					'per_page'   => array( 'type' => 'integer' ),
+				),
+			)
+		);
+
 		// User search for the Add Member modal. Registered under the
 		// fcom-mobile namespace (not appza/v1) because the mobile
 		// catalog's fc-users-search DataSource always calls it via
