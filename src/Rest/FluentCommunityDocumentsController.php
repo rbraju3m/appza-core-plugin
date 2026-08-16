@@ -395,6 +395,20 @@ class FluentCommunityDocumentsController {
 	}
 
 	/**
+	 * Files of ONE feed, in the same shape the documents tab renders.
+	 *
+	 * Public because the preview proxy needs it to enrich document posts
+	 * in the feed — where the only file data FC ships is the frozen
+	 * `meta.document_lists` snapshot with an unusable portal URL.
+	 *
+	 * @return array<int, array<string, mixed>>
+	 */
+	public function files_for_feed( int $feed_id ): array {
+		$byFeed = $this->files_for_feeds( array( $feed_id ) );
+		return $byFeed[ $feed_id ] ?? array();
+	}
+
+	/**
 	 * Live file rows keyed by feed id.
 	 *
 	 * `title` resolves the same way Media::getFileTitle does, so a file

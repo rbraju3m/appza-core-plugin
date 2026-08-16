@@ -39,6 +39,9 @@ class PreviewProxyController {
 		$this->snapshots = $snapshots ?: new CatalogSnapshotRepository();
 	}
 
+	/** @var FluentCommunityDocumentsController|null */
+	protected $documents = null;
+
 	public function handle( \WP_REST_Request $request ) {
 		$ds_slug      = sanitize_title( (string) $request->get_param( 'ds' ) );
 		$params_json  = (string) $request->get_param( 'params' );
@@ -315,6 +318,18 @@ class PreviewProxyController {
 	 * fixture shape stays honest to the real API + demo/real render the
 	 * same way.
 	 */
+	/**
+	 * Lazily-built documents controller, reused for its file derivation so
+	 * the feed card and the DOCUMENTS tab cannot drift apart on what a
+	 * file row is.
+	 */
+	protected function documents_controller() {
+		if ( null === $this->documents ) {
+			$this->documents = new FluentCommunityDocumentsController();
+		}
+		return $this->documents;
+	}
+
 	protected function normalize_items( $items, $viewer_id = 0 ) {
 		if ( ! is_array( $items ) ) {
 			return $items;
@@ -382,6 +397,21 @@ class PreviewProxyController {
 			$images = $this->build_images_from_meta( isset( $item['meta'] ) ? $item['meta'] : array() );
 			if ( ! empty( $images ) ) {
 				$items[ $i ]['images'] = $images;
+			}
+			// Document posts ("Publish as a post" on) reach the feed with
+			// their files only in `meta.document_lists` — a creation-time
+			// snapshot whose `url` is FC's portal download route, which
+			// needs a browser session and returns HTML, not a file. So the
+			// feed card had nothing renderable to show.
+			//
+			// Re-derive from the live Media rows, exactly as the DOCUMENTS
+			// tab does, and hand the card the same `files[]` shape it
+			// already knows: {id, media_key, title, type, kind, url}.
+			if ( isset( $item['content_type'] ) && 'document' === $item['content_type'] ) {
+				$files = $this->documents_controller()->files_for_feed( (int) $item['id'] );
+				if ( ! empty( $files ) ) {
+					$items[ $i ]['files'] = $files;
+				}
 			}
 			// Banner CTA buttons: derive Ionic fill/color from the API's
 			// `type` string so the renderer can bind them directly without
