@@ -241,6 +241,21 @@ class FluentCommunityDocumentsController {
 				'media_key' => (string) $row->media_key,
 				'title'     => $title,
 				'type'      => (string) $row->media_type,
+				// What tapping a file row opens. fcom-mobile's own download
+				// route rather than the raw media_url: it permission-checks
+				// the viewer, forces the attachment disposition the design's
+				// download glyph implies, and resolves by key — media_url is
+				// empty on rows whose upload didn't go through
+				// wp_handle_upload. The raw path rides along for callers that
+				// want to preview an image inline.
+				'url'       => add_query_arg(
+					array(
+						'media_key' => rawurlencode( (string) $row->media_key ),
+						'media_id'  => (int) $row->id,
+					),
+					home_url( '/wp-json/fcom-mobile/api/v1/documents/download' )
+				),
+				'media_url' => $this->absolute_url( (string) $row->media_url ),
 				// 'image' gets the picture glyph in the design, every
 				// other kind gets the document glyph.
 				'kind'      => $this->file_kind( (string) $row->media_type, $title ),
@@ -248,6 +263,19 @@ class FluentCommunityDocumentsController {
 		}
 
 		return $out;
+	}
+
+	/**
+	 * Absolutize a stored media URL. Already-absolute URLs pass through.
+	 */
+	private function absolute_url( string $url ): string {
+		if ( $url === '' ) {
+			return '';
+		}
+		if ( preg_match( '#^https?://#i', $url ) ) {
+			return $url;
+		}
+		return home_url( '/' . ltrim( $url, '/' ) );
 	}
 
 	/**

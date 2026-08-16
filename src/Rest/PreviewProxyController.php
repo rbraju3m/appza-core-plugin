@@ -1151,36 +1151,57 @@ class PreviewProxyController {
 	}
 
 	/**
-	 * Placeholder DOCUMENTS-tab data — this arc renders a placeholder
-	 * screen for the tab; a minimal fixture is enough to prove wiring.
+	 * Demo DOCUMENTS-tab data. Mirrors the live wrapper's shape exactly —
+	 * one entry per document POST (not per file), display strings already
+	 * composed, and a `files[]` array that fc-document-card expands via
+	 * children_from_prop. Demo mode is what the builder sees before a site
+	 * has real documents, so it has to render the same card as Real.
 	 */
 	protected function fixture_fc_space_documents() {
 		$now = time();
 		return array(
 			array(
 				'id'         => 901,
-				'title'      => 'Onboarding Guide.pdf',
-				'file_url'   => 'https://picsum.photos/seed/appza-doc-901/600/800',
-				'file_type'  => 'pdf',
-				'size'       => 245678,
-				'created_at' => gmdate( 'Y-m-d H:i:s', $now - 3 * 86400 ),
-				'uploader'   => array(
-					'user_id'      => 12,
-					'display_name' => 'Syed Khan',
-					'avatar'       => 'https://i.pravatar.cc/80?img=12',
+				'title'      => 'Uploaded 2 files',
+				'meta_line'  => '8 days ago by Nusrat Jahan',
+				'author'     => 'Nusrat Jahan',
+				'file_count' => 2,
+				'created_at' => gmdate( 'Y-m-d H:i:s', $now - 8 * 86400 ),
+				'files'      => array(
+					array(
+						'id'        => 9011,
+						'media_key' => 'demo-9011',
+						'title'     => 'Certificate -Nusrat-Jahan.pdf',
+						'type'      => 'application/pdf',
+						'url'       => '',
+						'kind'      => 'document',
+					),
+					array(
+						'id'        => 9012,
+						'media_key' => 'demo-9012',
+						'title'     => 'Screenshot_20260725-154546.Me.png',
+						'type'      => 'image/png',
+						'url'       => '',
+						'kind'      => 'image',
+					),
 				),
 			),
 			array(
 				'id'         => 902,
-				'title'      => 'Brand Assets.zip',
-				'file_url'   => 'https://picsum.photos/seed/appza-doc-902/600/800',
-				'file_type'  => 'zip',
-				'size'       => 1287654,
-				'created_at' => gmdate( 'Y-m-d H:i:s', $now - 10 * 86400 ),
-				'uploader'   => array(
-					'user_id'      => 21,
-					'display_name' => 'Jaime Bosco',
-					'avatar'       => 'https://i.pravatar.cc/80?img=15',
+				'title'      => 'Uploaded 1 file',
+				'meta_line'  => '22 days ago by Test User1',
+				'author'     => 'Test User1',
+				'file_count' => 1,
+				'created_at' => gmdate( 'Y-m-d H:i:s', $now - 22 * 86400 ),
+				'files'      => array(
+					array(
+						'id'        => 9021,
+						'media_key' => 'demo-9021',
+						'title'     => 'LazyTasks_Resolution_Guide_EN.docx',
+						'type'      => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+						'url'       => '',
+						'kind'      => 'document',
+					),
 				),
 			),
 		);
