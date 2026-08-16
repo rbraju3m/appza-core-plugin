@@ -246,6 +246,58 @@ class FluentCommunityDocumentsController {
 	}
 
 	/* ---------------------------------------------------------------
+	 * POST /spaces/documents/file/rename
+	 * ------------------------------------------------------------- */
+
+	/**
+	 * Rename a file that is already attached to a post.
+	 *
+	 * A file picked but not yet committed is renamed at upload time; this
+	 * is the other case — editing a document post that already exists.
+	 * Routed through FC's own /documents/update because that is the only
+	 * thing that ALSO repairs the feed's `document_lists` snapshot, which
+	 * the portal reads. Writing the Media row directly would rename the
+	 * file everywhere except the portal.
+	 */
+	public function rename_file( \WP_REST_Request $request ) {
+		$media_id = (int) $request->get_param( 'media_id' );
+		$title    = trim( (string) $request->get_param( 'title' ) );
+
+		if ( $media_id <= 0 || $title === '' ) {
+			return $this->error( 400, __( 'A file and a new name are both required.', 'appza-core' ) );
+		}
+
+		list( $status, $body ) = $this->loopback_post(
+			'/documents/update',
+			array(
+				'id'    => $media_id,
+				'title' => $title,
+			),
+			$request
+		);
+
+		if ( $status === 0 || $status < 200 || $status >= 300 ) {
+			return $this->error(
+				$status >= 400 ? $status : 400,
+				$this->upstream_message( $body, __( 'Could not rename the file.', 'appza-core' ) )
+			);
+		}
+
+		return rest_ensure_response(
+			array(
+				'response' => array(
+					'status'  => 200,
+					'message' => 'OK',
+				),
+				'data' => array(
+					'id'    => $media_id,
+					'title' => $title,
+				),
+			)
+		);
+	}
+
+	/* ---------------------------------------------------------------
 	 * POST /spaces/documents/create — the document post itself
 	 * ------------------------------------------------------------- */
 

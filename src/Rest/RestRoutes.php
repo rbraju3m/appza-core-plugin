@@ -305,6 +305,24 @@ class RestRoutes {
 			)
 		);
 
+		// Renaming a file that is already on a post. Adding and removing
+		// files on an existing post needs no endpoint of its own: FC's
+		// feed update takes the full desired document_ids list and works
+		// out the difference itself.
+		register_rest_route(
+			'fcom-mobile/api/v1',
+			'/spaces/documents/file/rename',
+			array(
+				'methods'             => \WP_REST_Server::CREATABLE,
+				'callback'            => array( $documents, 'rename_file' ),
+				'permission_callback' => array( $documents, 'permission_check' ),
+				'args'                => array(
+					'media_id' => array( 'type' => 'integer', 'required' => true ),
+					'title'    => array( 'type' => 'string', 'required' => true ),
+				),
+			)
+		);
+
 		// User search for the Add Member modal. Registered under the
 		// fcom-mobile namespace (not appza/v1) because the mobile
 		// catalog's fc-users-search DataSource always calls it via
