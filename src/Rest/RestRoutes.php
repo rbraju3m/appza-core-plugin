@@ -269,6 +269,42 @@ class RestRoutes {
 			)
 		);
 
+		// Add-document write paths. Both are slug-addressed wrappers —
+		// FC Pro's upload wants a numeric space_id, and /feeds/create
+		// needs status + topic + message rules applied before it sees
+		// the payload. See FluentCommunityDocumentsController.
+		register_rest_route(
+			'fcom-mobile/api/v1',
+			'/spaces/documents/upload',
+			array(
+				'methods'             => \WP_REST_Server::CREATABLE,
+				'callback'            => array( $documents, 'upload' ),
+				'permission_callback' => array( $documents, 'permission_check' ),
+				// No `args` type-checking here: the file rides in as a
+				// multipart part, and declaring the text field required
+				// would reject the request before the file is read.
+			)
+		);
+
+		register_rest_route(
+			'fcom-mobile/api/v1',
+			'/spaces/documents/create',
+			array(
+				'methods'             => \WP_REST_Server::CREATABLE,
+				'callback'            => array( $documents, 'create' ),
+				'permission_callback' => array( $documents, 'permission_check' ),
+				'args'                => array(
+					'space_slug'   => array( 'type' => 'string', 'required' => true ),
+					'title'        => array( 'type' => 'string' ),
+					'message'      => array( 'type' => 'string' ),
+					'document_ids' => array( 'type' => 'array', 'required' => true ),
+					'topic_ids'    => array( 'type' => 'array' ),
+					'publish'      => array( 'type' => 'boolean' ),
+					'scheduled_at' => array( 'type' => 'string' ),
+				),
+			)
+		);
+
 		// User search for the Add Member modal. Registered under the
 		// fcom-mobile namespace (not appza/v1) because the mobile
 		// catalog's fc-users-search DataSource always calls it via

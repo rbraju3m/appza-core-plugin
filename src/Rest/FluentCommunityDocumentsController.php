@@ -152,6 +152,211 @@ class FluentCommunityDocumentsController {
 	}
 
 	/* ---------------------------------------------------------------
+	 * POST /spaces/documents/upload — one file per call
+	 * ------------------------------------------------------------- */
+
+	/**
+	 * Slug-addressed wrapper over fcom-mobile's /documents/upload.
+	 *
+	 * Same two reasons as the listing route: FC Pro's upload demands a
+	 * numeric `space_id`, and the mobile side only ever knows the slug.
+	 * The file itself is handed straight through as file params —
+	 * FileSystem::put ends up in wp_handle_upload, which refuses
+	 * anything that isn't a genuine POSTed upload, so the multipart
+	 * request has to survive intact rather than being reconstructed.
+	 *
+	 * One file per call, because FC's processSpaceFiles only ever reads
+	 * `$uploadedFiles[0]`. The client uploads N files as N calls and
+	 * collects the returned media objects for the create step.
+	 */
+	public function upload( \WP_REST_Request $request ) {
+		$space = $this->resolve_space( (string) $request->get_param( 'space_slug' ) );
+		if ( ! $space ) {
+			return $this->error( 400, __( 'A valid space slug is required.', 'appza-core' ) );
+		}
+
+		$user_id = get_current_user_id();
+		if ( ! $this->can_upload( (int) $space->id, $user_id ) ) {
+			return $this->error( 403, __( 'You do not have permission to upload documents to this space.', 'appza-core' ) );
+		}
+
+		$files = $request->get_file_params();
+		if ( ! $files ) {
+			return $this->error( 400, __( 'No file was uploaded.', 'appza-core' ) );
+		}
+
+		$sub = new \WP_REST_Request( 'POST', '/fcom-mobile/api/v1/documents/upload' );
+		$sub->set_body_params( array( 'space_id' => (int) $space->id ) );
+		$sub->set_file_params( $files );
+
+		$response = rest_do_request( $sub );
+		$body     = $response->get_data();
+		if ( $response->is_error() ) {
+			return $this->error( 400, $this->upstream_message( $body, __( 'The upload failed.', 'appza-core' ) ) );
+		}
+
+		$file = isset( $body['items'] ) ? $body['items'] : null;
+		if ( ! is_array( $file ) || empty( $file['media_key'] ) ) {
+			$message = isset( $body['response']['message'] ) && $body['response']['message']
+				? (string) $body['response']['message']
+				: __( 'The upload did not return a file.', 'appza-core' );
+			return $this->error( 400, $message );
+		}
+
+		// The design lets a file be renamed before it is committed. FC
+		// stores the display name on the Media row's settings, and its
+		// own /documents/update is the only thing that also repairs the
+		// feed snapshot later — so rename through that rather than
+		// writing another plugin's table by hand.
+		$rename = trim( (string) $request->get_param( 'title' ) );
+		if ( $rename !== '' && $rename !== (string) ( $file['title'] ?? '' ) ) {
+			list( $rename_status, $rename_body ) = $this->loopback_post(
+				'/documents/update',
+				array(
+					'id'    => (int) $file['id'],
+					'title' => $rename,
+				),
+				$request
+			);
+			if ( $rename_status >= 200 && $rename_status < 300 ) {
+				$file['title'] = $rename;
+			} else {
+				// Not fatal: the file IS uploaded. Report the original
+				// name rather than losing the upload over a label.
+				$file['rename_error'] = $this->upstream_message( $rename_body, __( 'The file kept its original name.', 'appza-core' ) );
+			}
+		}
+
+		// Same per-file shape the listing route emits, so the draft's
+		// pending rows and the saved card's rows render identically.
+		$file['kind'] = $this->file_kind(
+			isset( $file['type'] ) ? (string) $file['type'] : '',
+			isset( $file['title'] ) ? (string) $file['title'] : ''
+		);
+
+		return rest_ensure_response(
+			array(
+				'response' => array(
+					'status'  => 200,
+					'message' => 'OK',
+				),
+				'data' => $file,
+			)
+		);
+	}
+
+	/* ---------------------------------------------------------------
+	 * POST /spaces/documents/create — the document post itself
+	 * ------------------------------------------------------------- */
+
+	/**
+	 * Creates the document feed from already-uploaded files.
+	 *
+	 * Wrapping /feeds/create rather than calling it from the catalog
+	 * keeps three pieces of business logic on this side of the wire:
+	 *
+	 *   - `publish` (the design's "Publish as a post" switch) maps to
+	 *     status `published` vs `unlisted`. Unlisted documents still
+	 *     appear in the DOCUMENTS tab; they just stay out of the feed.
+	 *   - A space can require at least one topic, and FC's error for
+	 *     that arrives as a bare 422 the client would have to parse.
+	 *   - FC requires a non-empty message. The design makes both text
+	 *     fields optional, so we fall back title -> filename summary
+	 *     rather than rejecting an upload that is otherwise complete.
+	 */
+	public function create( \WP_REST_Request $request ) {
+		$space = $this->resolve_space( (string) $request->get_param( 'space_slug' ) );
+		if ( ! $space ) {
+			return $this->error( 400, __( 'A valid space slug is required.', 'appza-core' ) );
+		}
+
+		$user_id = get_current_user_id();
+		if ( ! $this->can_upload( (int) $space->id, $user_id ) ) {
+			return $this->error( 403, __( 'You do not have permission to add documents to this space.', 'appza-core' ) );
+		}
+
+		$documents = $request->get_param( 'document_ids' );
+		$documents = is_array( $documents ) ? array_values( $documents ) : array();
+		if ( ! $documents ) {
+			return $this->error( 400, __( 'Attach at least one file before uploading.', 'appza-core' ) );
+		}
+
+		$title   = trim( (string) $request->get_param( 'title' ) );
+		$message = trim( (string) $request->get_param( 'message' ) );
+		if ( $message === '' ) {
+			/* translators: %d: number of uploaded files */
+			$message = $title !== ''
+				? $title
+				: sprintf( _n( 'Uploaded %d file', 'Uploaded %d files', count( $documents ), 'appza-core' ), count( $documents ) );
+		}
+
+		$topics = $request->get_param( 'topic_ids' );
+		$topics = is_array( $topics ) ? array_values( array_map( 'intval', $topics ) ) : array();
+
+		$publish = $request->get_param( 'publish' );
+		$publish = ( $publish === true || $publish === 'true' || $publish === 1 || $publish === '1' );
+
+		$payload = array(
+			'space'        => (string) $space->slug,
+			'title'        => $title,
+			'message'      => $message,
+			'content_type' => 'document',
+			'document_ids' => $documents,
+			'topic_ids'    => $topics,
+			'status'       => $publish ? 'published' : 'unlisted',
+		);
+
+		$scheduled_at = trim( (string) $request->get_param( 'scheduled_at' ) );
+		if ( $scheduled_at !== '' ) {
+			$payload['scheduled_at'] = $scheduled_at;
+		}
+
+		// This one CANNOT be a nested rest_do_request.
+		//
+		// FluentCommunity's own Request object reads the JSON payload from
+		// `php://input` and the $_POST/$_GET superglobals — not from the
+		// WP_REST_Request it is handed. So a sub-request dispatched inside
+		// our own HTTP request reaches FC's validator with OUR body, not
+		// the one we just built, and comes back "Message is required"
+		// however carefully the sub-request is populated. (It appears to
+		// work when dispatched from a plain PHP page, because there is no
+		// outer body to shadow it — which makes this an easy one to
+		// "verify" wrongly.)
+		//
+		// A loopback HTTP POST gives FC a request whose php://input really
+		// is this payload. The caller's Authorization header rides along so
+		// FC sees the same user; every write path in the app authenticates
+		// that way.
+		list( $status, $body ) = $this->loopback_post( '/feeds/create', $payload, $request );
+		if ( $status === 0 ) {
+			return $this->error( 502, $this->upstream_message( $body, __( 'Could not reach the community.', 'appza-core' ) ) );
+		}
+		if ( $status < 200 || $status >= 300 ) {
+			$message = $this->upstream_message( $body, '' );
+			// FC returns this when the space requires a topic and none
+			// was picked. Say so in the app's own words — the raw
+			// message names the web portal's field.
+			if ( stripos( $message, 'topic' ) !== false ) {
+				$message = __( 'Pick at least one topic before uploading.', 'appza-core' );
+			}
+			return $this->error(
+				$status >= 400 ? $status : 400,
+				$message !== '' ? $message : __( 'Could not create the document.', 'appza-core' )
+			);
+		}
+
+		return rest_ensure_response(
+			array(
+				'response' => array(
+					'status'  => 200,
+					'message' => 'OK',
+				),
+				'data' => is_array( $body ) && isset( $body['items'] ) ? $body['items'] : $body,
+			)
+		);
+	}
+
+	/* ---------------------------------------------------------------
 	 * Presentation
 	 * ------------------------------------------------------------- */
 
@@ -417,6 +622,98 @@ class FluentCommunityDocumentsController {
 				$slug
 			)
 		);
+	}
+
+	/**
+	 * POST to an fcom-mobile route over loopback HTTP, forwarding the
+	 * caller's credentials.
+	 *
+	 * Not `rest_do_request`: FluentCommunity's Request reads its JSON
+	 * payload from `php://input` and the superglobals rather than from
+	 * the WP_REST_Request it is given, so a nested dispatch reaches FC
+	 * carrying OUR request body instead of the one being sent. Only a
+	 * real HTTP request gives it the right `php://input`.
+	 *
+	 * Returns [status, decoded body]; status 0 means the request never
+	 * completed.
+	 */
+	private function loopback_post( string $route, array $payload, \WP_REST_Request $request ): array {
+		$headers = array( 'Content-Type' => 'application/json' );
+
+		$auth = $request->get_header( 'authorization' );
+		if ( ! is_string( $auth ) || $auth === '' ) {
+			$auth = $request->get_header( 'x_appza_auth' );
+		}
+		if ( is_string( $auth ) && $auth !== '' ) {
+			$headers['Authorization'] = $auth;
+		}
+
+		$raw = wp_remote_post(
+			home_url( '/wp-json/fcom-mobile/api/v1' . $route ),
+			array(
+				'timeout' => 20,
+				'headers' => $headers,
+				'body'    => wp_json_encode( $payload ),
+			)
+		);
+
+		if ( is_wp_error( $raw ) ) {
+			return array( 0, array( 'message' => $raw->get_error_message() ) );
+		}
+
+		$body   = json_decode( (string) wp_remote_retrieve_body( $raw ), true );
+		$http   = (int) wp_remote_retrieve_response_code( $raw );
+		$status = isset( $body['response']['status'] ) ? (int) $body['response']['status'] : $http;
+
+		return array( $status, is_array( $body ) ? $body : array() );
+	}
+
+	/**
+	 * Best-effort human message out of an upstream body.
+	 *
+	 * Neither fcom-mobile nor FC settles on one error shape: a failure
+	 * arrives as `response.message`, or WP's `message`, or a `errors`
+	 * bag keyed by field. Reading only one of them turned a 422 into an
+	 * uncaught TypeError once already.
+	 */
+	private function upstream_message( $body, string $fallback ): string {
+		if ( ! is_array( $body ) ) {
+			return $fallback;
+		}
+		foreach ( array( array( 'response', 'message' ), array( 'message' ) ) as $path ) {
+			$value = $body;
+			foreach ( $path as $key ) {
+				$value = is_array( $value ) && isset( $value[ $key ] ) ? $value[ $key ] : null;
+			}
+			if ( is_string( $value ) && $value !== '' ) {
+				return $value;
+			}
+			// FC returns `message` as a field-error bag on validation
+			// failures ({"required":"Message is required"}), so the string
+			// check alone silently loses the only useful text.
+			if ( is_array( $value ) ) {
+				foreach ( $value as $one ) {
+					if ( is_string( $one ) && $one !== '' ) {
+						return $one;
+					}
+				}
+			}
+		}
+		if ( isset( $body['errors'] ) && is_array( $body['errors'] ) ) {
+			foreach ( $body['errors'] as $field_errors ) {
+				if ( is_string( $field_errors ) && $field_errors !== '' ) {
+					return $field_errors;
+				}
+				if ( is_array( $field_errors ) ) {
+					foreach ( $field_errors as $one ) {
+						if ( is_string( $one ) && $one !== '' ) {
+							return $one;
+						}
+					}
+				}
+			}
+		}
+		return $fallback;
 	}
 
 	private function error( int $status, string $message ) {
