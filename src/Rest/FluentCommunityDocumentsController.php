@@ -414,7 +414,7 @@ class FluentCommunityDocumentsController {
 
 		$rows = $wpdb->get_results(
 			$wpdb->prepare(
-				"SELECT id, feed_id, media_key, media_type, media_url, settings
+				"SELECT id, feed_id, media_key, media_type, media_url, media_path, settings
 				 FROM {$table}
 				 WHERE feed_id IN ({$placeholders})
 				   AND object_source = 'space_document'
@@ -446,21 +446,29 @@ class FluentCommunityDocumentsController {
 				'media_key' => (string) $row->media_key,
 				'title'     => $title,
 				'type'      => (string) $row->media_type,
-				// What tapping a file row opens. fcom-mobile's own download
-				// route rather than the raw media_url: it permission-checks
-				// the viewer, forces the attachment disposition the design's
-				// download glyph implies, and resolves by key — media_url is
-				// empty on rows whose upload didn't go through
-				// wp_handle_upload. The raw path rides along for callers that
-				// want to preview an image inline.
-				'url'       => add_query_arg(
+				// What tapping a file row opens — and it has to be the FILE.
+				//
+				// This used to point at fcom-mobile's /documents/download,
+				// which reads like the right thing and is not: that route
+				// returns JSON ({file_name, media_type, file_url} with the
+				// URL base64-encoded) for an app to act on, and it requires
+				// authentication. Opening it in a browser or a WebView gets
+				// a 401 or a page of JSON, never a download — which is
+				// exactly what Noor saw on the phone.
+				//
+				// media_url is the direct uploads URL, and it is what
+				// fcom-mobile itself hands back for the local driver.
+				'url'       => $this->file_url( $row ),
+				'media_url' => $this->absolute_url( (string) $row->media_url ),
+				// Kept so a client that wants the JSON contract (file name,
+				// mime, signed URL for remote storage) can still ask.
+				'download_api_url' => add_query_arg(
 					array(
 						'media_key' => rawurlencode( (string) $row->media_key ),
 						'media_id'  => (int) $row->id,
 					),
 					home_url( '/wp-json/fcom-mobile/api/v1/documents/download' )
 				),
-				'media_url' => $this->absolute_url( (string) $row->media_url ),
 				// 'image' gets the picture glyph in the design, every
 				// other kind gets the document glyph.
 				'kind'      => $this->file_kind( (string) $row->media_type, $title ),
@@ -468,6 +476,37 @@ class FluentCommunityDocumentsController {
 		}
 
 		return $out;
+	}
+
+	/**
+	 * The URL that actually yields the file.
+	 *
+	 * `media_url` when FC recorded one. When it didn't — rows whose upload
+	 * bypassed wp_handle_upload — fall back to deriving it from
+	 * media_path, which is still a real location under wp-content/uploads.
+	 * Returns '' when neither resolves, so the client can render the row
+	 * without a dead link rather than opening a 404.
+	 */
+	private function file_url( $row ): string {
+		$url = $this->absolute_url( (string) $row->media_url );
+		if ( $url !== '' ) {
+			return $url;
+		}
+
+		$path = (string) ( $row->media_path ?? '' );
+		if ( $path === '' ) {
+			return '';
+		}
+		$uploads = wp_upload_dir();
+		if ( empty( $uploads['basedir'] ) || strpos( $path, $uploads['basedir'] ) !== 0 ) {
+			return '';
+		}
+		$relative = ltrim( substr( $path, strlen( $uploads['basedir'] ) ), '/' );
+		// media_path is a directory on rows seeded without a real file.
+		if ( $relative === '' || substr( $path, -1 ) === '/' ) {
+			return '';
+		}
+		return trailingslashit( $uploads['baseurl'] ) . $relative;
 	}
 
 	/**
