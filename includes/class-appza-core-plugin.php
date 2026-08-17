@@ -16,7 +16,7 @@ use AppzaCore\Plugin\Rest\AuthMiddleware;
 use AppzaCore\Plugin\Rest\AuthRoutes;
 use AppzaCore\Plugin\Rest\FluentCommunityFeedPermissionsFilter;
 use AppzaCore\Plugin\Rest\FluentCommunityFeedUpdateEnricher;
-use AppzaCore\Plugin\Rest\FluentCommunityFeedBySlugEnricher;
+use AppzaCore\Plugin\Rest\FluentCommunityFeedEnricher;
 use AppzaCore\Plugin\Rest\FluentCommunityMediaCap;
 use AppzaCore\Plugin\Rest\FluentCommunityMediaGalleryEnricher;
 use AppzaCore\Plugin\Rest\FluentCommunitySpaceConfigEnricher;
@@ -100,16 +100,17 @@ class Appza_Core_Plugin {
 		// has_more / cursor / has_audio envelope keys that fcom-mobile
 		// drops from FC Pro's response. See class docblock.
 		$fcMediaGallery = new FluentCommunityMediaGalleryEnricher();
-		// Makes /feeds/by/slug usable as a DataSource for post-detail:
-		// returns the post as a list of one, and fills the video_url the
-		// post card already binds for FluentPlayer uploads.
-		$fcFeedBySlug = new FluentCommunityFeedBySlugEnricher();
+		// Normalizes feed responses on BOTH the list (/feeds) and the
+		// single post (/feeds/by/slug): fills the video_url the post card
+		// binds for FluentPlayer uploads, synthesizes a preview for audio
+		// posts, and returns the single post as a list of one.
+		$fcFeed = new FluentCommunityFeedEnricher();
 		$this->loader->add_action( 'rest_api_init', $rest, 'register_routes' );
 		$this->loader->add_action( 'rest_api_init', $auth, 'register_routes' );
 		$this->loader->add_action( 'rest_api_init', $fcFeedPerms, 'register_hooks' );
 		$this->loader->add_action( 'rest_api_init', $fcSpaceConfig, 'register_hooks' );
 		$this->loader->add_action( 'rest_api_init', $fcMediaGallery, 'register_hooks' );
-		$this->loader->add_action( 'rest_api_init', $fcFeedBySlug, 'register_hooks' );
+		$this->loader->add_action( 'rest_api_init', $fcFeed, 'register_hooks' );
 		// Filter needs to be up whenever FC processes a feed write —
 		// which happens through rest_api_init for the mobile endpoint,
 		// AND through admin-ajax for the FC portal. plugins_loaded is

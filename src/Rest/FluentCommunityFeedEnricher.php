@@ -1,12 +1,16 @@
 <?php
 /**
- * Makes fcom-mobile's `/feeds/by/slug` usable as a DataSource, for the
- * post-detail screen.
+ * Normalizes fcom-mobile's feed responses for the renderer.
  *
- * Two jobs.
+ * Covers both the LIST (`/feeds`, which serves the home feed and the
+ * space feed alike) and the SINGLE post (`/feeds/by/slug`, which powers
+ * post-detail).
+ *
+ * Two jobs. The media normalization applies to every feed row on either
+ * route; the list-wrapping applies only to the single-post route.
  *
  * ---------------------------------------------------------------------
- * 1. Return the post as a LIST of one
+ * 1. Return the post as a LIST of one  (/feeds/by/slug only)
  * ---------------------------------------------------------------------
  *
  * The route answers with `items` set to the feed row itself — a bare
@@ -31,19 +35,18 @@
  * ---------------------------------------------------------------------
  *
  * `fc-post-card` binds its video child to `meta.media_preview.video_url`
- * and its poster to `.image`. FluentCommunity sets those for an OEMBED
- * (YouTube, Vimeo). A FluentPlayer UPLOAD carries the file on
- * `media_preview.url` (mirrored in `settings.src`) and sets neither — so
- * the binding resolved to nothing and the post showed no video at all.
+ * and its poster to `.image`, and shows that child only when
+ * `media_preview.type == 'oembed'`. FluentCommunity fills those for a
+ * real OEMBED (YouTube, Vimeo). A FluentPlayer UPLOAD carries the file on
+ * `media_preview.url` (mirrored in `settings.src`) and sets no
+ * `video_url`, so the binding resolved to nothing and the post showed no
+ * video. An AUDIO post has no `media_preview` at all — its file lives on
+ * `meta.audio_medias[]` — so it failed the visibility gate outright.
  *
- * Filling the field the catalog already asks for means no field_mapping
- * change and no new child: the same card renders both kinds. `video_url`
- * is only ever written when absent, so a real oembed is untouched.
- *
- * Scoped to this route deliberately. The identical normalization would
- * light up videos in the FEED list too, which is almost certainly wanted
- * — but that changes a screen nobody asked us to change, so it is called
- * out rather than done quietly.
+ * Filling the fields the catalog already asks for means no field_mapping
+ * change and no new child: one card renders oembeds, uploaded video and
+ * uploaded audio. `video_url` is only ever written when absent, so a real
+ * oembed is untouched.
  *
  * @package appza-core
  */
@@ -54,9 +57,13 @@ if ( ! defined( 'WPINC' ) ) {
 	die;
 }
 
-class FluentCommunityFeedBySlugEnricher {
+class FluentCommunityFeedEnricher {
 
-	const ROUTE = '/fcom-mobile/api/v1/feeds/by/slug';
+	/** One post, as a bare object. Powers post-detail. */
+	const ROUTE_SINGLE = '/fcom-mobile/api/v1/feeds/by/slug';
+
+	/** The feed list — serves both the home feed and a space's feed. */
+	const ROUTE_LIST = '/fcom-mobile/api/v1/feeds';
 
 	public function register_hooks() {
 		// rest_request_after_callbacks, like the sibling enrichers, so it
@@ -74,7 +81,10 @@ class FluentCommunityFeedBySlugEnricher {
 		if ( ! $response instanceof \WP_REST_Response ) {
 			return $response;
 		}
-		if ( (string) $request->get_route() !== self::ROUTE ) {
+		// Exact comparison, so ROUTE_LIST does not also swallow
+		// ROUTE_SINGLE (which is a path under it).
+		$route = (string) $request->get_route();
+		if ( self::ROUTE_SINGLE !== $route && self::ROUTE_LIST !== $route ) {
 			return $response;
 		}
 
@@ -82,14 +92,43 @@ class FluentCommunityFeedBySlugEnricher {
 		if ( ! is_array( $data ) || ! isset( $data['items'] ) || ! is_array( $data['items'] ) ) {
 			return $response;
 		}
-		// Already a list (a future fcom-mobile release, or a second filter
-		// got here first) — leave it alone.
-		if ( isset( $data['items'][0] ) ) {
+
+		$items = $data['items'];
+
+		// The single-post route hands back the row itself rather than a
+		// list. Wrap it, then treat it as a one-row list from here on so
+		// both routes share the media pass below.
+		//
+		// `isset($items[0])` distinguishes them: a list has a 0 key, a feed
+		// row does not. Guarding rather than trusting the route means a
+		// future fcom-mobile release that starts returning a proper list
+		// stops double-wrapping on its own.
+		$wrapped_single = false;
+		if ( self::ROUTE_SINGLE === $route && ! isset( $items[0] ) ) {
+			$items          = array( $items );
+			$wrapped_single = true;
+		}
+
+		// The list route paginates on some callers, putting rows under
+		// `items.data` instead of directly on `items`.
+		$paginated = ! $wrapped_single && ! isset( $items[0] ) && isset( $items['data'] ) && is_array( $items['data'] );
+		$rows      = $paginated ? $items['data'] : $items;
+		if ( ! is_array( $rows ) ) {
 			return $response;
 		}
 
-		$row  = $this->add_upload_video_url( $data['items'] );
-		$data['items'] = array( $row );
+		foreach ( $rows as $i => $row ) {
+			if ( is_array( $row ) ) {
+				$rows[ $i ] = $this->add_upload_video_url( $row );
+			}
+		}
+
+		if ( $paginated ) {
+			$items['data'] = $rows;
+		} else {
+			$items = $rows;
+		}
+		$data['items'] = $items;
 
 		$response->set_data( $data );
 
