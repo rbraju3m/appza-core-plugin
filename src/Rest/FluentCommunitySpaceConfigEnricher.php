@@ -152,6 +152,60 @@ class FluentCommunitySpaceConfigEnricher {
 		// Always set the key (empty object → renderer treats as "no
 		// overrides"), so the shape is predictable client-side.
 		$row['appza_config'] = $config ?: new \stdClass();
+		$row                 = $this->add_media_audio_permission( $row, $slug );
+		return $row;
+	}
+
+	/**
+	 * Adds `permissions.can_view_media_audio` — whether the Audios tab
+	 * should appear on the MEDIA sub-tab.
+	 *
+	 * Why it lives here rather than on the media response, where FC Pro
+	 * actually publishes it as `has_audio`: the preview proxy's contract
+	 * is that a DataSource resolves to a flat array of items, and it drops
+	 * every envelope key for every DS. `has_audio` therefore cannot reach
+	 * the renderer that way, and bending that contract for one flag — or
+	 * stamping a scalar onto every media row, which a space with zero
+	 * photos could not carry anyway — are both worse than putting it next
+	 * to the permission it belongs beside.
+	 *
+	 * Landing it on the space payload also means the renderer knows before
+	 * the MEDIA tab is ever opened, and the tab strip gates on it with the
+	 * same `requires_permission` mechanism the MEDIA sub-tab itself uses.
+	 *
+	 * Only computed for a space whose gallery is actually on: the check is
+	 * a LIKE over the media table, and every space-detail load would
+	 * otherwise pay for it to answer a question about a tab the viewer
+	 * cannot reach. Left unset when we cannot answer, which reads as
+	 * "show the tab" — the safe direction.
+	 *
+	 * @param array<string, mixed> $row
+	 * @return array<string, mixed>
+	 */
+	protected function add_media_audio_permission( array $row, string $slug ) {
+		$permissions = isset( $row['permissions'] ) && is_array( $row['permissions'] ) ? $row['permissions'] : null;
+		if ( null === $permissions || empty( $permissions['can_view_media'] ) ) {
+			return $row;
+		}
+		if ( ! class_exists( '\FluentCommunityPro\App\Modules\MediaGallery\Services\MediaGalleryService' ) ) {
+			return $row;
+		}
+		if ( ! class_exists( '\FluentCommunity\App\Models\Space' ) ) {
+			return $row;
+		}
+
+		try {
+			$space = \FluentCommunity\App\Models\Space::where( 'slug', $slug )->first();
+			if ( ! $space ) {
+				return $row;
+			}
+			$permissions['can_view_media_audio'] = (bool) \FluentCommunityPro\App\Modules\MediaGallery\Services\MediaGalleryService::spaceHasAudio( $space );
+			$row['permissions']                  = $permissions;
+		} catch ( \Throwable $e ) {
+			// Leave the key unset — the tab shows, which beats hiding a
+			// tab because a query failed.
+		}
+
 		return $row;
 	}
 
