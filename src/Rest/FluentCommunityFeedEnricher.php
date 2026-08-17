@@ -118,9 +118,14 @@ class FluentCommunityFeedEnricher {
 		}
 
 		foreach ( $rows as $i => $row ) {
-			if ( is_array( $row ) ) {
-				$rows[ $i ] = $this->add_upload_video_url( $row );
+			if ( ! is_array( $row ) ) {
+				continue;
 			}
+			$row = $this->add_upload_video_url( $row );
+			if ( self::ROUTE_SINGLE === $route ) {
+				$row = $this->add_appbar_title( $row );
+			}
+			$rows[ $i ] = $row;
 		}
 
 		if ( $paginated ) {
@@ -133,6 +138,36 @@ class FluentCommunityFeedEnricher {
 		$response->set_data( $data );
 
 		return $response;
+	}
+
+	/**
+	 * A never-empty label for the post-detail app bar.
+	 *
+	 * Most FluentCommunity posts are status-style and carry `title = ''`,
+	 * so binding the bar straight to the post title would leave it blank
+	 * on roughly half of them — and the renderer's field-mapping merger
+	 * skips null but NOT empty string, so the catalog default would not
+	 * rescue it either.
+	 *
+	 * Falls back the way the portal reads in context: the post's own
+	 * title, else the space it lives in, else a plain generic. Composed
+	 * here rather than in the renderer so the bar has one thing to bind
+	 * and no conditional.
+	 *
+	 * @param array<string, mixed> $row
+	 * @return array<string, mixed>
+	 */
+	protected function add_appbar_title( array $row ) {
+		$title = isset( $row['title'] ) && is_string( $row['title'] ) ? trim( $row['title'] ) : '';
+		if ( '' === $title && isset( $row['space']['title'] ) && is_string( $row['space']['title'] ) ) {
+			$title = trim( $row['space']['title'] );
+		}
+		if ( '' === $title ) {
+			$title = __( 'Post', 'appza-core' );
+		}
+		$row['appbar_title'] = $title;
+
+		return $row;
 	}
 
 	/**
