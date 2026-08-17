@@ -145,37 +145,16 @@ class FluentCommunityFeedEnricher {
 		}
 		$meta = $row['meta'];
 
-		// An AUDIO post carries nothing on media_preview at all — its file
-		// lives on `meta.audio_medias[]`, a separate list, because
-		// FluentPlayer allows several audios per post where it allows one
-		// video. Synthesize the preview the card binds so a single audio
-		// post plays without the card needing to know about a second field.
+		// Audio is NOT handled here. It lives on `meta.audio_medias[]`, a
+		// list, because FluentPlayer allows several audios per post where
+		// it allows one video — and the post card now renders that array
+		// through its own child (children[29], appza-audio-list), one
+		// player per file.
 		//
-		// Only the FIRST entry is surfaced. A post with several audios shows
-		// one player; rendering all of them needs a repeated child on the
-		// card, which is its own piece of work.
-		if ( empty( $meta['media_preview'] ) && ! empty( $meta['audio_medias'] ) && is_array( $meta['audio_medias'] ) ) {
-			$first = null;
-			foreach ( $meta['audio_medias'] as $candidate ) {
-				if ( is_array( $candidate ) ) {
-					$first = $candidate;
-					break;
-				}
-			}
-			if ( $first ) {
-				$meta['media_preview'] = array(
-					'type'         => 'oembed',
-					'content_type' => isset( $first['content_type'] ) ? $first['content_type'] : 'audio',
-					'url'          => isset( $first['url'] ) ? $first['url'] : '',
-					'title'        => isset( $first['title'] ) ? $first['title'] : '',
-					'player'       => isset( $first['player'] ) ? $first['player'] : 'fluent_player',
-					'provider'     => isset( $first['provider'] ) ? $first['provider'] : 'upload',
-					'settings'     => isset( $first['settings'] ) && is_array( $first['settings'] ) ? $first['settings'] : array(),
-				);
-				$row['meta'] = $meta;
-			}
-		}
-
+		// This used to synthesize a media_preview from the first entry so
+		// the video child could show it. That showed exactly one player no
+		// matter how many were attached, and now that the card handles the
+		// array properly, synthesizing would render the first audio TWICE.
 		if ( ! isset( $meta['media_preview'] ) || ! is_array( $meta['media_preview'] ) ) {
 			return $row;
 		}
@@ -185,7 +164,8 @@ class FluentCommunityFeedEnricher {
 		if ( ! empty( $mp['video_url'] ) ) {
 			return $row;
 		}
-		if ( empty( $mp['content_type'] ) || ! in_array( $mp['content_type'], array( 'video', 'audio' ), true ) ) {
+		// Video only, for the reason above.
+		if ( empty( $mp['content_type'] ) || 'video' !== $mp['content_type'] ) {
 			return $row;
 		}
 
