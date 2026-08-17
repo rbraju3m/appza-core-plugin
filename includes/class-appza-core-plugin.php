@@ -17,6 +17,7 @@ use AppzaCore\Plugin\Rest\AuthRoutes;
 use AppzaCore\Plugin\Rest\FluentCommunityFeedPermissionsFilter;
 use AppzaCore\Plugin\Rest\FluentCommunityFeedUpdateEnricher;
 use AppzaCore\Plugin\Rest\FluentCommunityMediaCap;
+use AppzaCore\Plugin\Rest\FluentCommunityMediaGalleryEnricher;
 use AppzaCore\Plugin\Rest\FluentCommunitySpaceConfigEnricher;
 use AppzaCore\Plugin\Rest\RestRoutes;
 use AppzaCore\Plugin\Schema\SchemaManager;
@@ -93,10 +94,16 @@ class Appza_Core_Plugin {
 		// Powers per-space renderer overrides (switcher / subtabs /
 		// cover / topics) without editing the fcom-mobile plug-in.
 		$fcSpaceConfig = new FluentCommunitySpaceConfigEnricher();
+		// Reshapes fcom-mobile's /media-gallery response for the MEDIA
+		// sub-tab: flattens each item to leaf keys, and restores the
+		// has_more / cursor / has_audio envelope keys that fcom-mobile
+		// drops from FC Pro's response. See class docblock.
+		$fcMediaGallery = new FluentCommunityMediaGalleryEnricher();
 		$this->loader->add_action( 'rest_api_init', $rest, 'register_routes' );
 		$this->loader->add_action( 'rest_api_init', $auth, 'register_routes' );
 		$this->loader->add_action( 'rest_api_init', $fcFeedPerms, 'register_hooks' );
 		$this->loader->add_action( 'rest_api_init', $fcSpaceConfig, 'register_hooks' );
+		$this->loader->add_action( 'rest_api_init', $fcMediaGallery, 'register_hooks' );
 		// Filter needs to be up whenever FC processes a feed write —
 		// which happens through rest_api_init for the mobile endpoint,
 		// AND through admin-ajax for the FC portal. plugins_loaded is
