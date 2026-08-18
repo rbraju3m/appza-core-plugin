@@ -153,6 +153,70 @@ class FluentCommunitySpaceConfigEnricher {
 		// overrides"), so the shape is predictable client-side.
 		$row['appza_config'] = $config ?: new \stdClass();
 		$row                 = $this->add_media_audio_permission( $row, $slug );
+		$row                 = $this->add_chat_permission( $row, $slug );
+		return $row;
+	}
+
+	/**
+	 * Adds `permissions.can_view_chat` + `chat_thread_id` — whether the
+	 * CHAT sub-tab should appear, and which conversation it opens.
+	 *
+	 * This IS the space's "Group Chat?" toggle. FluentMessaging creates a
+	 * Thread row when the toggle goes on and flips that row's status to
+	 * 'disabled' when it goes off (it never deletes it, so the history
+	 * survives a re-enable). So "has an ACTIVE thread" is the honest
+	 * reading of the toggle, and it is one indexed lookup.
+	 *
+	 * Same reason it lives here as can_view_media_audio: the sub-tab
+	 * strip gates entries with `requires_permission`, which reads the
+	 * permissions bag on the fc-space-detail row the AppZet already
+	 * resolves — so the gate costs no extra request, and the renderer
+	 * knows before the tab is ever tapped.
+	 *
+	 * `chat_thread_id` rides along so a future caller can address the
+	 * thread directly; the CHAT tab itself does not need it, because our
+	 * chat routes accept a space slug for exactly this reason.
+	 *
+	 * Unlike the audio flag this one is set EXPLICITLY to false rather
+	 * than left unset. Failing open is right for a tab whose absence is
+	 * cosmetic; a CHAT tab that opens an empty screen because the site
+	 * has no messaging plugin is a dead end, so the safe direction here
+	 * is the other way.
+	 *
+	 * @param array<string, mixed> $row
+	 * @return array<string, mixed>
+	 */
+	protected function add_chat_permission( array $row, string $slug ) {
+		$permissions = isset( $row['permissions'] ) && is_array( $row['permissions'] ) ? $row['permissions'] : array();
+
+		$permissions['can_view_chat'] = false;
+		$row['chat_thread_id']        = 0;
+
+		// Membership is part of the question, not a separate one: FC's
+		// hasChatAccess() demands an active space pivot for a community
+		// thread, so a non-member who tapped CHAT would get a 403 and an
+		// empty screen. FluentMessaging's own portal header-link filter
+		// makes the same check before it offers the link.
+		$is_member = ! empty( $permissions['is_member'] );
+
+		if ( $is_member
+			&& class_exists( '\FluentMessaging\App\Services\ChatHelper' )
+			&& class_exists( '\FluentCommunity\App\Models\Space' ) ) {
+			try {
+				$space = \FluentCommunity\App\Models\Space::where( 'slug', $slug )->first();
+				if ( $space ) {
+					$thread = \FluentMessaging\App\Services\ChatHelper::getChatThread( $space->id );
+					if ( $thread && 'active' === $thread->status ) {
+						$permissions['can_view_chat'] = true;
+						$row['chat_thread_id']        = (int) $thread->id;
+					}
+				}
+			} catch ( \Throwable $e ) {
+				// Keep the explicit false — see the note above.
+			}
+		}
+
+		$row['permissions'] = $permissions;
 		return $row;
 	}
 

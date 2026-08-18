@@ -346,6 +346,65 @@ class RestRoutes {
 			)
 		);
 
+		// Chat — the space CHAT tab and the conversation screen. Three
+		// routes fcom-mobile does not cover: it drops the thread details
+		// from its messages response, every one of its chat routes wants
+		// a numeric thread id (the CHAT tab only has a slug), and it
+		// never wrapped FC's delete-thread. Everything it DOES wrap
+		// (messages/add, messages/delete, threads/leave|block|unblock,
+		// chat/spaces/members) is used as-is. Same namespace rationale
+		// as the invitations + documents routes above.
+		$chat = new FluentCommunityChatController();
+		register_rest_route(
+			'fcom-mobile/api/v1',
+			'/chat/thread',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => array( $chat, 'thread' ),
+				'permission_callback' => array( $chat, 'permission_check' ),
+				'args'                => array(
+					// Any ONE of the three identifies a thread; they are
+					// tried in this order.
+					'thread_id'  => array( 'type' => 'integer' ),
+					'space_slug' => array( 'type' => 'string' ),
+					'user_id'    => array( 'type' => 'integer' ),
+				),
+			)
+		);
+
+		register_rest_route(
+			'fcom-mobile/api/v1',
+			'/chat/messages',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => array( $chat, 'messages' ),
+				'permission_callback' => array( $chat, 'permission_check' ),
+				'args'                => array(
+					'thread_id'  => array( 'type' => 'integer' ),
+					'space_slug' => array( 'type' => 'string' ),
+					'user_id'    => array( 'type' => 'integer' ),
+					'per_page'   => array( 'type' => 'integer' ),
+					'before_id'  => array( 'type' => 'integer' ),
+				),
+			)
+		);
+
+		// POST rather than DELETE, for the same reason the invitation
+		// routes are: every write the catalog wires is a POST, so the
+		// renderer's HTTP action needs no special case.
+		register_rest_route(
+			'fcom-mobile/api/v1',
+			'/chat/threads/delete',
+			array(
+				'methods'             => \WP_REST_Server::CREATABLE,
+				'callback'            => array( $chat, 'delete_thread' ),
+				'permission_callback' => array( $chat, 'permission_check' ),
+				'args'                => array(
+					'thread_id' => array( 'type' => 'integer', 'required' => true ),
+				),
+			)
+		);
+
 		register_rest_route(
 			APPZA_CORE_REST_NAMESPACE,
 			'/preview/data',
