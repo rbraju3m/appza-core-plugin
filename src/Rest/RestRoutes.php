@@ -411,6 +411,24 @@ class RestRoutes {
 			)
 		);
 
+		// Delete, with the image swept up behind it. Named `/remove`
+		// because fcom-mobile already owns `/chat/messages/delete` in
+		// this namespace — registering the same route twice leaves which
+		// callback answers up to registration order. Ours delegates the
+		// delete to that route and adds the sweep either side.
+		register_rest_route(
+			'fcom-mobile/api/v1',
+			'/chat/messages/remove',
+			array(
+				'methods'             => \WP_REST_Server::CREATABLE,
+				'callback'            => array( $chat, 'remove' ),
+				'permission_callback' => array( $chat, 'permission_check' ),
+				'args'                => array(
+					'message_id' => array( 'type' => 'integer', 'required' => true ),
+				),
+			)
+		);
+
 		register_rest_route(
 			'fcom-mobile/api/v1',
 			'/chat/messages/upload',

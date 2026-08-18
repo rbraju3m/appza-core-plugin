@@ -290,6 +290,159 @@ class FluentCommunityChatController {
 	}
 
 	/* ---------------------------------------------------------------
+	 * POST /chat/messages/remove
+	 * ------------------------------------------------------------- */
+
+	/**
+	 * Delete a message AND the image it carried.
+	 *
+	 * FluentCommunity's own delete drops the message row and stops
+	 * there — the Media row stays active and the file stays on disk, so
+	 * every deleted image message leaves an orphan behind. Nothing links
+	 * the two back together afterwards either: chat media is stored with
+	 * `feed_id` set to the THREAD, not the message, so once the message
+	 * text is gone there is no way to tell which file belonged to it.
+	 * The sweep therefore has to read the message BEFORE it is deleted,
+	 * which is why this is a route of its own rather than a filter on
+	 * the way out.
+	 *
+	 * Named `/remove` rather than `/delete` only because fcom-mobile
+	 * already owns `/chat/messages/delete` in this namespace, and
+	 * registering the same route twice leaves which callback answers up
+	 * to registration order.
+	 *
+	 * The delete itself is delegated to fcom-mobile's route so FC's own
+	 * before/after hooks and broadcast still run; this adds the sweep on
+	 * either side of it and nothing else.
+	 *
+	 * Media::delete() unlinks the file through its `deleting` hook, so
+	 * the row and the file go together. FC's own thread-delete settles
+	 * for `is_active = 0`, which leaves the file — worth deviating from,
+	 * since the whole point here is not to leave one.
+	 */
+	public function remove( \WP_REST_Request $request ) {
+		if ( ! $this->chat_available() ) {
+			return $this->error( 400, __( 'Chat is not available on this site.', 'appza-core' ) );
+		}
+
+		$viewer     = get_current_user_id();
+		$message_id = (int) $request->get_param( 'message_id' );
+		$message    = $message_id > 0 ? \FluentMessaging\App\Models\Message::find( $message_id ) : null;
+
+		if ( ! $message ) {
+			return $this->error( 404, __( 'That message could not be found.', 'appza-core' ) );
+		}
+
+		$thread = $message->thread;
+		if ( ! $thread || ! \FluentMessaging\App\Services\ChatHelper::hasChatAccess( $thread, $viewer ) ) {
+			return $this->error( 403, __( 'You do not have access to this conversation.', 'appza-core' ) );
+		}
+
+		// Mirror FC's own guards rather than trusting the client, so this
+		// route can never delete something its own route would refuse.
+		$meta = is_array( $message->meta ) ? $message->meta : array();
+		if ( ! empty( $meta['system_event'] ) ) {
+			return $this->error( 400, __( 'System messages cannot be deleted.', 'appza-core' ) );
+		}
+		if ( (int) $message->user_id !== $viewer && ! $this->can_delete_any( $thread, $viewer ) ) {
+			return $this->error( 403, __( 'You are not allowed to delete this message.', 'appza-core' ) );
+		}
+
+		// Read the attachments while the message still exists.
+		$urls = $this->image_urls_in( (string) $message->text );
+
+		list( $status, $body ) = $this->loopback_post(
+			'/fcom-mobile/api/v1/chat/messages/delete',
+			array( 'message_id' => $message_id ),
+			$request
+		);
+		$inner = isset( $body['response']['status'] ) ? (int) $body['response']['status'] : $status;
+		if ( 200 !== $inner ) {
+			return $this->error( $inner ?: 400, $this->upstream_message( $body, __( 'The message could not be deleted.', 'appza-core' ) ) );
+		}
+
+		$swept = $this->sweep_media( $urls, (int) $thread->id );
+
+		return rest_ensure_response(
+			array(
+				'response' => array(
+					'status'  => 200,
+					'message' => __( 'Message deleted', 'appza-core' ),
+				),
+				'data' => array(
+					'id'          => $message_id,
+					'media_swept' => $swept,
+				),
+			)
+		);
+	}
+
+	/**
+	 * The `src` of every image in a stored chat message.
+	 *
+	 * @return array<int, string>
+	 */
+	private function image_urls_in( string $html ): array {
+		if ( ! preg_match_all( '/<img[^>]+src=["\']([^"\']+)["\']/i', $html, $m ) ) {
+			return array();
+		}
+		$out = array();
+		foreach ( $m[1] as $src ) {
+			$src = html_entity_decode( $src, ENT_QUOTES, 'UTF-8' );
+			if ( '' !== $src ) {
+				$out[] = $src;
+			}
+		}
+		return array_values( array_unique( $out ) );
+	}
+
+	/**
+	 * Delete the Media rows behind the given URLs, file included.
+	 *
+	 * Scoped to this thread's chat media, so a malformed URL cannot reach
+	 * a post's attachment or another conversation's. And skipped whenever
+	 * a surviving message in the thread still shows the same image —
+	 * sending one uploaded file twice is enough to make that real, and
+	 * the second message would be left pointing at a deleted file.
+	 *
+	 * @param array<int, string> $urls
+	 */
+	private function sweep_media( array $urls, int $thread_id ): int {
+		if ( ! $urls || ! class_exists( '\FluentCommunity\App\Models\Media' ) ) {
+			return 0;
+		}
+
+		$swept = 0;
+		foreach ( $urls as $url ) {
+			$still_used = \FluentMessaging\App\Models\Message::where( 'thread_id', $thread_id )
+				->where( 'text', 'LIKE', '%' . $this->esc_like( $url ) . '%' )
+				->exists();
+			if ( $still_used ) {
+				continue;
+			}
+
+			$rows = \FluentCommunity\App\Models\Media::where( 'object_source', 'chat_message' )
+				->where( 'feed_id', $thread_id )
+				->where( 'media_url', $url )
+				->get();
+
+			foreach ( $rows as $row ) {
+				// Fires the model's `deleting` hook, which unlinks the
+				// local file — the row and the file go together.
+				$row->delete();
+				$swept++;
+			}
+		}
+
+		return $swept;
+	}
+
+	private function esc_like( string $value ): string {
+		global $wpdb;
+		return $wpdb->esc_like( $value );
+	}
+
+	/* ---------------------------------------------------------------
 	 * POST /chat/messages/upload
 	 * ------------------------------------------------------------- */
 
