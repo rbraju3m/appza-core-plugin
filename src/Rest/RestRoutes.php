@@ -429,6 +429,26 @@ class RestRoutes {
 			)
 		);
 
+		// Throwing away a pending attachment. The scheduled sweep catches
+		// what no client call can — an app killed mid-compose — but the
+		// user who simply changes their mind should not have to wait a
+		// day for the file to go.
+		register_rest_route(
+			'fcom-mobile/api/v1',
+			'/chat/media/discard',
+			array(
+				'methods'             => \WP_REST_Server::CREATABLE,
+				'callback'            => array( $chat, 'discard_media' ),
+				'permission_callback' => array( $chat, 'permission_check' ),
+				'args'                => array(
+					'media_key' => array( 'type' => 'string' ),
+					// The client holds the URL the upload returned, which
+					// carries the key as a query arg — either will do.
+					'url'       => array( 'type' => 'string' ),
+				),
+			)
+		);
+
 		register_rest_route(
 			'fcom-mobile/api/v1',
 			'/chat/messages/upload',

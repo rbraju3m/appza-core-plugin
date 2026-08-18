@@ -74,6 +74,14 @@ class FluentCommunityChatController {
 	/** Seconds within which FC still considers a profile "active now". */
 	private const ACTIVE_WINDOW = 300;
 
+	/**
+	 * `object_source` we stamp on a chat upload the moment it lands, so
+	 * an abandoned one can be told apart from an abandoned post upload.
+	 * FluentCommunity overwrites it with 'chat_message' when a message
+	 * claims the file.
+	 */
+	private const PENDING_SOURCE = 'chat_message_pending';
+
 	public function permission_check() {
 		return is_user_logged_in();
 	}
@@ -414,10 +422,7 @@ class FluentCommunityChatController {
 
 		$swept = 0;
 		foreach ( $urls as $url ) {
-			$still_used = \FluentMessaging\App\Models\Message::where( 'thread_id', $thread_id )
-				->where( 'text', 'LIKE', '%' . $this->esc_like( $url ) . '%' )
-				->exists();
-			if ( $still_used ) {
+			if ( $this->media_is_referenced( $url, $thread_id ) ) {
 				continue;
 			}
 
@@ -440,6 +445,131 @@ class FluentCommunityChatController {
 	private function esc_like( string $value ): string {
 		global $wpdb;
 		return $wpdb->esc_like( $value );
+	}
+
+	/* ---------------------------------------------------------------
+	 * POST /chat/media/discard  +  the scheduled sweep
+	 * ------------------------------------------------------------- */
+
+	/**
+	 * Throw away an image that was uploaded but never sent.
+	 *
+	 * FluentCommunity creates the Media row at UPLOAD time, not at send
+	 * time, so a composer the user changes their mind about leaves a row
+	 * and a file behind that nothing will ever reference. Tapping the ×
+	 * on a pending thumbnail comes here.
+	 *
+	 * Ownership, not just access: only the uploader can discard, so one
+	 * member of a conversation cannot delete another's pending file by
+	 * guessing a media_key.
+	 */
+	public function discard_media( \WP_REST_Request $request ) {
+		if ( ! class_exists( '\FluentCommunity\App\Models\Media' ) ) {
+			return $this->error( 400, __( 'Media is not available on this site.', 'appza-core' ) );
+		}
+
+		$viewer = get_current_user_id();
+		$key    = trim( (string) $request->get_param( 'media_key' ) );
+		if ( '' === $key ) {
+			// The client holds the URL the upload returned, which carries
+			// the key as a query arg.
+			$url = (string) $request->get_param( 'url' );
+			if ( '' !== $url ) {
+				$query = wp_parse_url( $url, PHP_URL_QUERY );
+				parse_str( (string) $query, $args );
+				$key = isset( $args['media_key'] ) ? (string) $args['media_key'] : '';
+			}
+		}
+		if ( '' === $key ) {
+			return $this->error( 400, __( 'A media key is required.', 'appza-core' ) );
+		}
+
+		$media = \FluentCommunity\App\Models\Media::where( 'media_key', $key )->first();
+
+		if ( ! $media ) {
+			// Already gone — the caller wanted it gone, so say yes.
+			return $this->ok_message( __( 'Attachment discarded', 'appza-core' ), array( 'discarded' => 0 ) );
+		}
+		if ( (int) $media->user_id !== $viewer ) {
+			return $this->error( 403, __( 'That attachment is not yours to discard.', 'appza-core' ) );
+		}
+		// Only ever a PENDING upload of ours. The × means "unsend this
+		// one I have not sent"; a client passing the wrong key must not
+		// be able to reach a sent message's image, or a post's.
+		if ( self::PENDING_SOURCE !== (string) $media->object_source ) {
+			return $this->error( 409, __( 'That attachment is already part of a message.', 'appza-core' ) );
+		}
+		if ( $this->media_is_referenced( (string) $media->media_url, (int) $media->feed_id ) ) {
+			return $this->error( 409, __( 'That attachment is already part of a message.', 'appza-core' ) );
+		}
+
+		$media->delete();
+
+		return $this->ok_message( __( 'Attachment discarded', 'appza-core' ), array( 'discarded' => 1 ) );
+	}
+
+	/**
+	 * Delete chat images that were uploaded, never sent, and are old
+	 * enough that nobody is still composing with them.
+	 *
+	 * The explicit discard above covers the user who changes their mind.
+	 * This covers everything else — an app killed mid-compose, a lost
+	 * connection between the upload and the send — which no client-side
+	 * call can reach. Runs daily on WP-cron.
+	 *
+	 * @param int $older_than Seconds an upload must have survived before
+	 *                        it counts as abandoned. Two hours is far
+	 *                        past any real compose, so an in-progress
+	 *                        message is never at risk.
+	 * @param int $limit      Rows examined per run, so one pass can never
+	 *                        become an unbounded job on a busy site.
+	 * @return int            How many were swept.
+	 */
+	public function sweep_abandoned_media( int $older_than = 7200, int $limit = 200 ): int {
+		if ( ! class_exists( '\FluentCommunity\App\Models\Media' ) || ! $this->chat_available() ) {
+			return 0;
+		}
+
+		$cutoff = gmdate( 'Y-m-d H:i:s', time() - max( 60, $older_than ) );
+
+		// Only our own pending uploads. A row FluentCommunity has already
+		// claimed is a sent message's image and belongs to the
+		// conversation; a row with no marker at all belongs to some other
+		// composer entirely, very likely a post draft.
+		$candidates = \FluentCommunity\App\Models\Media::where( 'object_source', self::PENDING_SOURCE )
+			->where( 'created_at', '<', $cutoff )
+			->orderBy( 'id' )
+			->limit( max( 1, $limit ) )
+			->get();
+
+		$swept = 0;
+		foreach ( $candidates as $media ) {
+			if ( $this->media_is_referenced( (string) $media->media_url, (int) $media->feed_id ) ) {
+				continue;
+			}
+			// Row and file together — see the note on sweep_media().
+			$media->delete();
+			$swept++;
+		}
+
+		return $swept;
+	}
+
+	/**
+	 * Is any message in this conversation still showing this file?
+	 *
+	 * Scoped to the thread because that is the only place a chat image
+	 * can be referenced — FC stores chat media with `feed_id` set to the
+	 * thread — and an unscoped LIKE over every message would be a table
+	 * scan per candidate.
+	 */
+	private function media_is_referenced( string $media_url, int $thread_id ): bool {
+		if ( '' === $media_url ) {
+			return false;
+		}
+		return \FluentMessaging\App\Models\Message::where( 'thread_id', $thread_id )
+			->where( 'text', 'LIKE', '%' . $this->esc_like( $media_url ) . '%' )
+			->exists();
 	}
 
 	/* ---------------------------------------------------------------
@@ -495,6 +625,34 @@ class FluentCommunityChatController {
 				$message = $body['message'];
 			}
 			return $this->error( 400, $message );
+		}
+
+		// Mark the row as OURS and unclaimed.
+		//
+		// FluentCommunity creates the Media row here, at upload, and only
+		// stamps object_source / feed_id when a message finally claims it.
+		// Until then an abandoned chat upload is indistinguishable from an
+		// abandoned POST upload — same empty object_source, same null
+		// feed_id — so a sweep written against that shape would also bin
+		// the image a half-written post draft is holding in the portal.
+		//
+		// Stamping a marker of our own makes the sweep exact: it only ever
+		// looks at uploads this route made. FC's claim path finds media by
+		// media_key with no object_source filter, so it still overwrites
+		// this to 'chat_message' on send — a claimed row leaves the pending
+		// state by itself, with nothing here to keep in step.
+		if ( ! empty( $body['media_key'] ) && class_exists( '\FluentCommunity\App\Models\Media' ) ) {
+			try {
+				\FluentCommunity\App\Models\Media::where( 'media_key', (string) $body['media_key'] )
+					->update(
+						array(
+							'object_source' => self::PENDING_SOURCE,
+							'feed_id'       => (int) $thread->id,
+						)
+					);
+			} catch ( \Throwable $e ) {
+				// A missed marker costs the row a sweep, not the upload.
+			}
 		}
 
 		return rest_ensure_response(
@@ -1038,6 +1196,24 @@ class FluentCommunityChatController {
 	private function chat_available(): bool {
 		return class_exists( '\FluentMessaging\App\Models\Thread' )
 			&& class_exists( '\FluentMessaging\App\Services\ChatHelper' );
+	}
+
+	/**
+	 * A write's envelope — a message plus whatever it did, rather than a
+	 * list of rows.
+	 *
+	 * @param array<string, mixed> $data
+	 */
+	private function ok_message( string $message, array $data = array() ) {
+		return rest_ensure_response(
+			array(
+				'response' => array(
+					'status'  => 200,
+					'message' => $message,
+				),
+				'data' => $data,
+			)
+		);
 	}
 
 	/**

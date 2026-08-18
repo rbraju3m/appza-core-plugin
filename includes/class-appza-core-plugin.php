@@ -14,6 +14,7 @@ use AppzaCore\Plugin\Admin\AssetLoader;
 use AppzaCore\Plugin\Repository\RefreshTokenRepository;
 use AppzaCore\Plugin\Rest\AuthMiddleware;
 use AppzaCore\Plugin\Rest\AuthRoutes;
+use AppzaCore\Plugin\Rest\FluentCommunityChatController;
 use AppzaCore\Plugin\Rest\FluentCommunityFeedPermissionsFilter;
 use AppzaCore\Plugin\Rest\FluentCommunityFeedUpdateEnricher;
 use AppzaCore\Plugin\Rest\FluentCommunityFeedEnricher;
@@ -43,6 +44,7 @@ class Appza_Core_Plugin {
 	protected function define_maintenance_hooks() {
 		$this->loader->add_action( 'plugins_loaded', $this, 'maybe_upgrade_schema' );
 		$this->loader->add_action( Appza_Core_Activator::CRON_PURGE_REFRESH_TOKENS, $this, 'purge_refresh_tokens' );
+		$this->loader->add_action( Appza_Core_Activator::CRON_SWEEP_CHAT_MEDIA, $this, 'sweep_chat_media' );
 	}
 
 	/**
@@ -60,10 +62,20 @@ class Appza_Core_Plugin {
 		if ( ! wp_next_scheduled( Appza_Core_Activator::CRON_PURGE_REFRESH_TOKENS ) ) {
 			wp_schedule_event( time() + HOUR_IN_SECONDS, 'daily', Appza_Core_Activator::CRON_PURGE_REFRESH_TOKENS );
 		}
+		// Scheduled here as well as on activation: activation hooks do not
+		// re-fire on update, so a site already running the plug-in would
+		// otherwise never pick the sweep up.
+		if ( ! wp_next_scheduled( Appza_Core_Activator::CRON_SWEEP_CHAT_MEDIA ) ) {
+			wp_schedule_event( time() + HOUR_IN_SECONDS, 'daily', Appza_Core_Activator::CRON_SWEEP_CHAT_MEDIA );
+		}
 	}
 
 	public function purge_refresh_tokens() {
 		( new RefreshTokenRepository() )->purge_expired();
+	}
+
+	public function sweep_chat_media() {
+		( new FluentCommunityChatController() )->sweep_abandoned_media();
 	}
 
 	protected function set_locale() {
