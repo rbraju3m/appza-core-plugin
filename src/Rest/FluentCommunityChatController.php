@@ -205,6 +205,164 @@ class FluentCommunityChatController {
 	}
 
 	/* ---------------------------------------------------------------
+	 * POST /chat/messages/send
+	 * ------------------------------------------------------------- */
+
+	/**
+	 * Send a message.
+	 *
+	 * fcom-mobile's /chat/messages/add would do, except that it takes a
+	 * numeric thread id — and the space CHAT tab only ever has a slug.
+	 * Rather than make the client resolve the thread before every send,
+	 * or thread a resolved id through renderer state where it would
+	 * outlive the screen that produced it, this takes the same
+	 * thread_id-or-space_slug pair both read routes take.
+	 *
+	 * `reply_to` / `reply_text` and `media` pass through to FC unchanged:
+	 * FC stores the reply on the message meta and re-resolves each media
+	 * URL back to its Media row, so nothing here needs to understand
+	 * either.
+	 *
+	 * The write goes over loopback HTTP, not a nested dispatch, because
+	 * FluentCommunity reads its payload from php://input — a nested call
+	 * would reach it carrying OUR body (P78).
+	 */
+	public function send( \WP_REST_Request $request ) {
+		if ( ! $this->chat_available() ) {
+			return $this->error( 400, __( 'Chat is not available on this site.', 'appza-core' ) );
+		}
+
+		$viewer = get_current_user_id();
+		$thread = $this->resolve_thread( $request, $viewer );
+
+		if ( ! $thread ) {
+			return $this->error( 404, __( 'This conversation could not be found.', 'appza-core' ) );
+		}
+		if ( ! \FluentMessaging\App\Services\ChatHelper::hasChatAccess( $thread, $viewer ) ) {
+			return $this->error( 403, __( 'You do not have access to this conversation.', 'appza-core' ) );
+		}
+
+		$text  = trim( (string) $request->get_param( 'text' ) );
+		$media = $request->get_param( 'media' );
+		$media = is_array( $media ) ? array_values( array_filter( array_map( 'strval', $media ) ) ) : array();
+
+		if ( '' === $text && ! $media ) {
+			return $this->error( 400, __( 'A message needs some text or an image.', 'appza-core' ) );
+		}
+
+		$payload = array( 'text' => $text );
+		if ( $media ) {
+			$payload['mediaItems'] = $media;
+		}
+
+		$reply_to = (int) $request->get_param( 'reply_to' );
+		if ( $reply_to > 0 ) {
+			$payload['reply_to'] = $reply_to;
+			// FC stores the quoted text verbatim rather than re-reading
+			// the replied-to message, so the client sends what it showed.
+			$payload['reply_text'] = (string) $request->get_param( 'reply_text' );
+		}
+
+		list( $status, $body ) = $this->loopback_post(
+			"/fluent-community/v2/chat/messages/{$thread->id}",
+			$payload,
+			$request
+		);
+
+		if ( 200 !== $status ) {
+			return $this->error( $status ?: 400, $this->upstream_message( $body, __( 'The message could not be sent.', 'appza-core' ) ) );
+		}
+
+		$message = isset( $body['message'] ) && is_array( $body['message'] ) ? $body['message'] : array();
+
+		return rest_ensure_response(
+			array(
+				'response' => array(
+					'status'  => 200,
+					'message' => __( 'Message sent', 'appza-core' ),
+				),
+				'data' => array(
+					'id'        => isset( $message['id'] ) ? (int) $message['id'] : 0,
+					'thread_id' => (int) $thread->id,
+				),
+			)
+		);
+	}
+
+	/* ---------------------------------------------------------------
+	 * POST /chat/messages/upload
+	 * ------------------------------------------------------------- */
+
+	/**
+	 * One image, uploaded ahead of the message that will carry it.
+	 *
+	 * FC's own media_upload route is addressed by numeric thread id and
+	 * fcom-mobile never wrapped it, so this is the slug-addressable
+	 * front door — the same two reasons the read routes above exist.
+	 *
+	 * The nested dispatch is safe here even though P78 says writes go
+	 * over loopback: FluentCommunity's UploadHelper reads `$_FILES`
+	 * directly rather than the request object, and this IS the outermost
+	 * HTTP request, so the superglobal is already the real multipart
+	 * body. The documents upload takes the same route for the same
+	 * reason.
+	 *
+	 * Returns the media URL, which is what `mediaItems` on the send call
+	 * expects — FC re-resolves the Media row from it.
+	 */
+	public function upload( \WP_REST_Request $request ) {
+		if ( ! $this->chat_available() ) {
+			return $this->error( 400, __( 'Chat is not available on this site.', 'appza-core' ) );
+		}
+
+		$viewer = get_current_user_id();
+		$thread = $this->resolve_thread( $request, $viewer );
+
+		if ( ! $thread ) {
+			return $this->error( 404, __( 'This conversation could not be found.', 'appza-core' ) );
+		}
+		if ( ! \FluentMessaging\App\Services\ChatHelper::hasChatAccess( $thread, $viewer ) ) {
+			return $this->error( 403, __( 'You do not have access to this conversation.', 'appza-core' ) );
+		}
+
+		$files = $request->get_file_params();
+		if ( ! $files ) {
+			return $this->error( 400, __( 'No file was uploaded.', 'appza-core' ) );
+		}
+
+		$sub = new \WP_REST_Request( 'POST', "/fluent-community/v2/chat/messages/{$thread->id}/media_upload" );
+		$sub->set_file_params( $files );
+
+		$response = rest_do_request( $sub );
+		$body     = $response->get_data();
+
+		if ( $response->is_error() || empty( $body['url'] ) ) {
+			$message = __( 'The upload failed.', 'appza-core' );
+			if ( is_array( $body ) && ! empty( $body['message'] ) && is_string( $body['message'] ) ) {
+				$message = $body['message'];
+			}
+			return $this->error( 400, $message );
+		}
+
+		return rest_ensure_response(
+			array(
+				'response' => array(
+					'status'  => 200,
+					'message' => 'OK',
+				),
+				'data' => array(
+					'url'       => (string) $body['url'],
+					'media_key' => isset( $body['media_key'] ) ? (string) $body['media_key'] : '',
+					'type'      => isset( $body['type'] ) ? (string) $body['type'] : '',
+					'width'     => isset( $body['width'] ) ? (int) $body['width'] : 0,
+					'height'    => isset( $body['height'] ) ? (int) $body['height'] : 0,
+					'thread_id' => (int) $thread->id,
+				),
+			)
+		);
+	}
+
+	/* ---------------------------------------------------------------
 	 * POST /chat/threads/delete
 	 * ------------------------------------------------------------- */
 
@@ -633,6 +791,85 @@ class FluentCommunityChatController {
 		}
 
 		return function_exists( 'mb_strtoupper' ) ? mb_strtoupper( $letters ) : strtoupper( $letters );
+	}
+
+	/* ---------------------------------------------------------------
+	 * Loopback
+	 * ------------------------------------------------------------- */
+
+	/**
+	 * POST to a REST route over loopback HTTP, forwarding the caller's
+	 * credentials.
+	 *
+	 * Not `rest_do_request`: FluentCommunity's Request reads its JSON
+	 * payload from `php://input` and the superglobals rather than from
+	 * the WP_REST_Request it is handed, so a nested dispatch reaches it
+	 * carrying OUR request body instead of the one being sent (P78).
+	 *
+	 * Forwarding the Authorization header is enough because /fcom-login
+	 * issues a WordPress application password — so the Basic credential
+	 * the app holds is one core itself resolves on the way back in.
+	 *
+	 * @param string $path Full REST path after /wp-json, e.g. /fluent-community/v2/...
+	 * @return array{0:int, 1:array} [status, decoded body]; status 0 = never completed.
+	 */
+	private function loopback_post( string $path, array $payload, \WP_REST_Request $request ): array {
+		$headers = array( 'Content-Type' => 'application/json' );
+
+		$auth = $request->get_header( 'authorization' );
+		if ( ! is_string( $auth ) || '' === $auth ) {
+			$auth = $request->get_header( 'x_appza_auth' );
+		}
+		if ( is_string( $auth ) && '' !== $auth ) {
+			$headers['Authorization'] = $auth;
+		}
+
+		$raw = wp_remote_post(
+			home_url( '/wp-json' . $path ),
+			array(
+				'timeout' => 20,
+				'headers' => $headers,
+				'body'    => wp_json_encode( $payload ),
+			)
+		);
+
+		if ( is_wp_error( $raw ) ) {
+			return array( 0, array( 'message' => $raw->get_error_message() ) );
+		}
+
+		$body = json_decode( (string) wp_remote_retrieve_body( $raw ), true );
+		$http = (int) wp_remote_retrieve_response_code( $raw );
+
+		return array( $http, is_array( $body ) ? $body : array() );
+	}
+
+	/**
+	 * Best-effort human message out of an upstream body. Neither FC nor
+	 * WP settles on one error shape — `message` is sometimes a string and
+	 * sometimes a field-error bag — so reading only one of them turns a
+	 * validation failure into a blank toast.
+	 */
+	private function upstream_message( $body, string $fallback ): string {
+		if ( ! is_array( $body ) ) {
+			return $fallback;
+		}
+		foreach ( array( array( 'response', 'message' ), array( 'message' ) ) as $path ) {
+			$value = $body;
+			foreach ( $path as $key ) {
+				$value = is_array( $value ) && isset( $value[ $key ] ) ? $value[ $key ] : null;
+			}
+			if ( is_string( $value ) && '' !== $value ) {
+				return $value;
+			}
+			if ( is_array( $value ) ) {
+				foreach ( $value as $one ) {
+					if ( is_string( $one ) && '' !== $one ) {
+						return $one;
+					}
+				}
+			}
+		}
+		return $fallback;
 	}
 
 	/* ---------------------------------------------------------------

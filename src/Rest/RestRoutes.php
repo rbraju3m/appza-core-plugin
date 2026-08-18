@@ -389,6 +389,41 @@ class RestRoutes {
 			)
 		);
 
+		// Send + attach. fcom-mobile does wrap the send, but only by
+		// numeric thread id, and the CHAT tab has a slug — so these take
+		// the same thread_id-or-space_slug pair the read routes take and
+		// the client never has to resolve a thread before it can talk.
+		register_rest_route(
+			'fcom-mobile/api/v1',
+			'/chat/messages/send',
+			array(
+				'methods'             => \WP_REST_Server::CREATABLE,
+				'callback'            => array( $chat, 'send' ),
+				'permission_callback' => array( $chat, 'permission_check' ),
+				'args'                => array(
+					'thread_id'  => array( 'type' => 'integer' ),
+					'space_slug' => array( 'type' => 'string' ),
+					'text'       => array( 'type' => 'string' ),
+					'reply_to'   => array( 'type' => 'integer' ),
+					'reply_text' => array( 'type' => 'string' ),
+					'media'      => array( 'type' => 'array' ),
+				),
+			)
+		);
+
+		register_rest_route(
+			'fcom-mobile/api/v1',
+			'/chat/messages/upload',
+			array(
+				'methods'             => \WP_REST_Server::CREATABLE,
+				'callback'            => array( $chat, 'upload' ),
+				'permission_callback' => array( $chat, 'permission_check' ),
+				// No `args` type-checking: the image rides in as a
+				// multipart part, and declaring a required text field
+				// would reject the request before the file is read.
+			)
+		);
+
 		// POST rather than DELETE, for the same reason the invitation
 		// routes are: every write the catalog wires is a POST, so the
 		// renderer's HTTP action needs no special case.
