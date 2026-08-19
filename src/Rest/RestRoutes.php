@@ -478,6 +478,58 @@ class RestRoutes {
 			)
 		);
 
+		// Leaderboard — the viewer's card, the levels card, the ranking
+		// list. fcom-mobile's /leader-board answers with all three ranges
+		// at once under items[0]['data-list'][<key>], which a DataSource
+		// cannot bind, and neither of its other two routes carries the
+		// lock verdict or the viewer-relative arithmetic the portal
+		// shows. Public read: the board is visible to logged-out visitors
+		// whenever the site's privacy setting says `everybody`, which is
+		// FluentCommunity's default. Everything viewer-specific gates
+		// itself inside the controller. Same namespace rationale as the
+		// chat + invitations + documents routes above.
+		$leaderboard = new FluentCommunityLeaderboardController();
+		register_rest_route(
+			'fcom-mobile/api/v1',
+			'/leaderboard/me',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => array( $leaderboard, 'me' ),
+				'permission_callback' => array( $leaderboard, 'permission_check' ),
+			)
+		);
+
+		register_rest_route(
+			'fcom-mobile/api/v1',
+			'/leaderboard/levels',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => array( $leaderboard, 'levels_route' ),
+				'permission_callback' => array( $leaderboard, 'permission_check' ),
+				'args'                => array(
+					// preview (default) | all — VIEW ALL and the points
+					// sheet ask for `all`.
+					'scope'         => array( 'type' => 'string' ),
+					'preview_count' => array( 'type' => 'integer' ),
+				),
+			)
+		);
+
+		register_rest_route(
+			'fcom-mobile/api/v1',
+			'/leaderboard/ranks',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => array( $leaderboard, 'ranks' ),
+				'permission_callback' => array( $leaderboard, 'permission_check' ),
+				'args'                => array(
+					// FluentCommunity Pro's own range keys.
+					'range'    => array( 'type' => 'string' ),
+					'per_page' => array( 'type' => 'integer' ),
+				),
+			)
+		);
+
 		register_rest_route(
 			APPZA_CORE_REST_NAMESPACE,
 			'/preview/data',
