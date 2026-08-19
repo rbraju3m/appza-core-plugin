@@ -65,6 +65,19 @@ class FluentCommunityFeedEnricher {
 	/** The feed list — serves both the home feed and a space's feed. */
 	const ROUTE_LIST = '/fcom-mobile/api/v1/feeds';
 
+	/**
+	 * The viewer's bookmarks — the Saved Posts screen (2026-08-19).
+	 *
+	 * Shaped exactly like ROUTE_LIST and drawn by the same card, so it
+	 * needs the same media pass: without it a saved FluentPlayer upload
+	 * or audio post renders as a card with a hole where its player is,
+	 * while the identical post on the feed plays.
+	 */
+	const ROUTE_BOOKMARKS = '/fcom-mobile/api/v1/feeds/bookmarks';
+
+	/** Routes whose rows are a plain list of feed rows. */
+	const LIST_ROUTES = [ self::ROUTE_LIST, self::ROUTE_BOOKMARKS ];
+
 	public function register_hooks() {
 		// rest_request_after_callbacks, like the sibling enrichers, so it
 		// also fires for the internal rest_do_request the simulator's
@@ -82,9 +95,9 @@ class FluentCommunityFeedEnricher {
 			return $response;
 		}
 		// Exact comparison, so ROUTE_LIST does not also swallow
-		// ROUTE_SINGLE (which is a path under it).
+		// ROUTE_SINGLE or ROUTE_BOOKMARKS (both are paths under it).
 		$route = (string) $request->get_route();
-		if ( self::ROUTE_SINGLE !== $route && self::ROUTE_LIST !== $route ) {
+		if ( self::ROUTE_SINGLE !== $route && ! in_array( $route, self::LIST_ROUTES, true ) ) {
 			return $response;
 		}
 

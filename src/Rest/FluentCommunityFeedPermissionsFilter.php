@@ -36,6 +36,12 @@ class FluentCommunityFeedPermissionsFilter {
 		'/fcom-mobile/api/v1/feeds/patch',
 		'/fcom-mobile/api/v1/feeds/update',
 		'/fcom-mobile/api/v1/feeds/by/slug',
+		// Saved Posts (2026-08-19). The same rows as /feeds, filtered to
+		// the viewer's bookmarks — and the 3-dot sheet on that screen is
+		// gated entirely on the bag computed below. Without this line
+		// every saved post offers every menu item to everybody, which is
+		// exactly the difference Noor's design 4 turns on.
+		'/fcom-mobile/api/v1/feeds/bookmarks',
 	];
 
 	public function register_hooks() {
@@ -75,6 +81,24 @@ class FluentCommunityFeedPermissionsFilter {
 			return $response;
 		}
 		$items = $data['items'];
+
+		// An EMPTY list is a list, and must stay one.
+		//
+		// Without this, `looks_like_row_list([])` says false (there is no
+		// first key to inspect), the single-row branch below runs, and a
+		// zero-row response comes back as
+		// `items: {permissions: {...}}` — one object where there were no
+		// rows. Everything downstream then counts one row: hide_when_empty
+		// never fires, the empty-state verdict never publishes, and the
+		// screen paints a ghost card instead of "No matches".
+		//
+		// Caught on /feeds/bookmarks, where an empty result is an ordinary
+		// state (search for something you have not saved). /feeds has the
+		// same shape and the same latent bug; it simply never returns zero
+		// rows on a community with any content in it.
+		if ( is_array( $items ) && empty( $items ) ) {
+			return $response;
+		}
 
 		$currentUser = null;
 		$currentUserResolved = false;

@@ -645,9 +645,36 @@ class PreviewProxyController {
 				return $this->fixture_fc_space_members();
 			case 'fc-space-documents':
 				return $this->fixture_fc_space_documents();
+			case 'fc-bookmarks':
+				return $this->fixture_fc_bookmarks();
 			default:
 				return array();
 		}
+	}
+
+	/**
+	 * Demo saved posts, so the Saved Posts screen is reviewable in the
+	 * simulator's demo mode instead of showing its empty state.
+	 *
+	 * The feed fixture, marked bookmarked — the rows are shape-identical
+	 * (the real route is FluentCommunity's own feed query filtered to the
+	 * viewer's bookmarks) and inventing a second body of demo content
+	 * would only give the two screens different-looking cards for no
+	 * reason.
+	 *
+	 * `bookmarked` is what the card's glyph binds to, and on this screen
+	 * every row is bookmarked by definition — a hollow glyph here would
+	 * be demo data contradicting the page it is demoing.
+	 */
+	protected function fixture_fc_bookmarks() {
+		$rows = $this->fixture_fc_feed();
+		foreach ( $rows as $i => $row ) {
+			if ( is_array( $row ) ) {
+				$rows[ $i ]['bookmarked'] = true;
+			}
+		}
+
+		return $rows;
 	}
 
 	/**

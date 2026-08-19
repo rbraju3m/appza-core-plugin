@@ -150,7 +150,7 @@ class BootstrapController {
 	 * Drop screens whose feature is switched off in the Source
 	 * Integration's own settings.
 	 *
-	 * Only the Leaderboard so far. The screen is removed rather than
+	 * The Leaderboard and Saved Posts. The screen is removed rather than
 	 * flagged because the drawer is generated from `template_screens`:
 	 * anything left in the list is a tappable entry, and a page that
 	 * exists only to say the feature is off is worse than no page. The
@@ -169,6 +169,9 @@ class BootstrapController {
 		$gated = array();
 		if ( ! $this->leaderboard_enabled() ) {
 			$gated[] = 'leaderboard';
+		}
+		if ( ! $this->bookmarks_enabled() ) {
+			$gated[] = 'bookmarks';
 		}
 
 		if ( ! $gated ) {
@@ -202,6 +205,113 @@ class BootstrapController {
 		}
 
 		return (bool) \FluentCommunity\App\Services\Helper::isFeatureEnabled( 'leader_board_module' );
+	}
+
+	/**
+	 * Settings -> Menu Settings -> Profile Dropdown Items -> Bookmarks ->
+	 * Edit Link -> "Enable this link".
+	 *
+	 * This is the switch Noor pointed at for the Saved Posts screen, and
+	 * it is the half of that dialog that can be answered here: whether
+	 * the link exists at all is a property of the site, not of who is
+	 * asking. The other half — Visibility — is per-viewer and is
+	 * deliberately NOT resolved in this method; see
+	 * fluent_community_settings() below.
+	 *
+	 * Read off the raw option rather than Helper::getMenuItemsGroup(),
+	 * which resolves the whole menu FOR THE CURRENT USER. Bootstrap is
+	 * public-read and cached per template, so a per-viewer answer
+	 * computed here would be whoever warmed the cache.
+	 *
+	 * Defaults to enabled: FluentCommunity ships Bookmarks on, and a site
+	 * that has never opened Menu Settings has no stored entry at all.
+	 */
+	protected function bookmarks_enabled() {
+		if ( ! class_exists( '\\FluentCommunity\\App\\Functions\\Utility' ) ) {
+			return false;
+		}
+
+		$item = $this->bookmarks_menu_item();
+
+		// No stored entry means the site is running FluentCommunity's
+		// defaults, where the link is enabled.
+		if ( null === $item ) {
+			return true;
+		}
+
+		// FluentCommunity's own rule (Helper::isLinkAccessible): absent
+		// means yes, anything other than 'yes' means no.
+		$enabled = isset( $item['enabled'] ) ? $item['enabled'] : 'yes';
+		if ( 'yes' !== $enabled ) {
+			return false;
+		}
+
+		// A link marked unavailable is one FluentCommunity itself has
+		// switched off underneath the admin's choice.
+		return ( isset( $item['is_unavailable'] ) ? $item['is_unavailable'] : 'no' ) !== 'yes';
+	}
+
+	/**
+	 * The stored Bookmarks entry from FluentCommunity's menu option, or
+	 * null when the site has never saved Menu Settings.
+	 *
+	 * The option stores profileDropdownItems as a LIST, and the admin can
+	 * reorder it, so the entry is found by slug rather than by position.
+	 *
+	 * @return array<string, mixed>|null
+	 */
+	protected function bookmarks_menu_item() {
+		static $cached = false;
+		static $value  = null;
+
+		if ( $cached ) {
+			return $value;
+		}
+		$cached = true;
+
+		$groups = \FluentCommunity\App\Functions\Utility::getOption( 'fluent_community_menu_groups', array() );
+		if ( ! is_array( $groups ) || empty( $groups['profileDropdownItems'] ) || ! is_array( $groups['profileDropdownItems'] ) ) {
+			return $value;
+		}
+
+		foreach ( $groups['profileDropdownItems'] as $item ) {
+			if ( is_array( $item ) && isset( $item['slug'] ) && 'bookmarks' === $item['slug'] ) {
+				$value = $item;
+				break;
+			}
+		}
+
+		return $value;
+	}
+
+	/**
+	 * Edit Link -> Visibility, raw.
+	 *
+	 * @return string public | logged_in | logged_out_only | members_only,
+	 *                or '' when the site has not set one.
+	 */
+	protected function bookmarks_visibility() {
+		$item = $this->bookmarks_menu_item();
+		if ( null === $item || ! isset( $item['privacy'] ) || ! is_string( $item['privacy'] ) ) {
+			return '';
+		}
+
+		return $item['privacy'];
+	}
+
+	/**
+	 * Edit Link -> "Select Space/Course Memberships", read only when
+	 * Visibility is members_only.
+	 *
+	 * @return array<int, int>
+	 */
+	protected function bookmarks_membership_ids() {
+		$item = $this->bookmarks_menu_item();
+		if ( null === $item || empty( $item['membership_ids'] ) || ! is_array( $item['membership_ids'] ) ) {
+			return array();
+		}
+
+		return array_values( array_map( 'intval', $item['membership_ids'] ) );
 	}
 
 	/**
@@ -240,6 +350,23 @@ class BootstrapController {
 			// The verdict travels with the leaderboard payload instead,
 			// which is fetched per request and per viewer.
 			'leaderboard_members_visibility' => $this->leaderboard_visibility(),
+			// Menu Settings -> Bookmarks -> Edit Link, split the same way
+			// the two leaderboard switches are (D64).
+			//
+			// `enabled` is a property of the site, so the screen is
+			// already gone from the catalog when this is false; the flag
+			// rides along so a shell can explain itself rather than
+			// silently missing a page.
+			//
+			// `visibility` is a property of the VIEWER, so it is shipped
+			// raw and resolved where the auth state is actually known —
+			// the shells, which is also where FluentCommunity resolves it
+			// (its portal filters its own sidebar, not its settings).
+			// Resolving it here would bake whoever warmed the cache into
+			// every later response.
+			'bookmarks_enabled'              => $this->bookmarks_enabled(),
+			'bookmarks_visibility'           => $this->bookmarks_visibility(),
+			'bookmarks_membership_ids'       => $this->bookmarks_membership_ids(),
 		);
 	}
 
