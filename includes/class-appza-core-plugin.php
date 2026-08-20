@@ -18,6 +18,7 @@ use AppzaCore\Plugin\Rest\FluentCommunityChatController;
 use AppzaCore\Plugin\Rest\FluentCommunityFeedPermissionsFilter;
 use AppzaCore\Plugin\Rest\FluentCommunityFeedUpdateEnricher;
 use AppzaCore\Plugin\Rest\FluentCommunityFeedEnricher;
+use AppzaCore\Plugin\Rest\PreviewCacheInvalidator;
 use AppzaCore\Plugin\Rest\FluentCommunityMediaCap;
 use AppzaCore\Plugin\Rest\FluentCommunityMediaGalleryEnricher;
 use AppzaCore\Plugin\Rest\FluentCommunitySpaceConfigEnricher;
@@ -117,12 +118,19 @@ class Appza_Core_Plugin {
 		// binds for FluentPlayer uploads, synthesizes a preview for audio
 		// posts, and returns the single post as a list of one.
 		$fcFeed = new FluentCommunityFeedEnricher();
+		// Drops a viewer's cached preview-proxy reads as soon as that
+		// viewer writes through fcom-mobile. Not just freshness: the
+		// reaction controls send a toggle whose DIRECTION the client
+		// reads off the row it holds, so a stale row makes the next tap
+		// send the opposite of what was intended.
+		$previewCache = new PreviewCacheInvalidator();
 		$this->loader->add_action( 'rest_api_init', $rest, 'register_routes' );
 		$this->loader->add_action( 'rest_api_init', $auth, 'register_routes' );
 		$this->loader->add_action( 'rest_api_init', $fcFeedPerms, 'register_hooks' );
 		$this->loader->add_action( 'rest_api_init', $fcSpaceConfig, 'register_hooks' );
 		$this->loader->add_action( 'rest_api_init', $fcMediaGallery, 'register_hooks' );
 		$this->loader->add_action( 'rest_api_init', $fcFeed, 'register_hooks' );
+		$this->loader->add_action( 'rest_api_init', $previewCache, 'register_hooks' );
 		// Filter needs to be up whenever FC processes a feed write —
 		// which happens through rest_api_init for the mobile endpoint,
 		// AND through admin-ajax for the FC portal. plugins_loaded is

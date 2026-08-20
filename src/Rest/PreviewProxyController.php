@@ -63,13 +63,30 @@ class PreviewProxyController {
 		$auth_header = $this->extract_auth_header( $request );
 		$auth_bucket = $auth_header ? substr( md5( $auth_header ), 0, 12 ) : 'anon';
 
-		$cache_key = 'appza_preview_' . md5( $template_slug . '|' . $ds_slug . '|' . $params_json . '|' . $mode . '|' . $auth_bucket );
+		// The viewer's cache generation rides IN the key, so a write can
+		// invalidate every cached read this viewer holds by incrementing
+		// one integer — no enumerating transients, and it works the same
+		// whether transients live in the options table or an external
+		// object cache. Orphaned entries are already TTL-bounded and
+		// simply expire unread. See bump_generation() below.
+		$generation = self::generation_for( $auth_bucket );
+		$cache_key  = 'appza_preview_' . $auth_bucket . '_' . $generation . '_'
+			. md5( $template_slug . '|' . $ds_slug . '|' . $params_json . '|' . $mode );
+
+		// The catalog's own cache_ttl for this DataSource. 0 means "never
+		// cache" — fc-bookmarks declares it because the Saved Posts list
+		// changes the moment the viewer un-saves something. Until now the
+		// column was decorative: every source was cached for a flat 300s
+		// regardless of what it asked for, so a source that had declared
+		// itself uncacheable was cached for five minutes.
+		$cache_ttl = $this->resolve_cache_ttl( $template_slug, $ds_slug );
+
 		// `nocache=1` bypasses the transient read (still writes fresh result
 		// after fetch, so subsequent normal reads benefit). Used by
 		// plug-in-admin's Refresh button + window-focus revalidation to
-		// pull new upstream posts without waiting the 5-min TTL.
+		// pull new upstream posts without waiting out the TTL.
 		$nocache = '1' === (string) $request->get_param( 'nocache' );
-		if ( ! $nocache ) {
+		if ( ! $nocache && $cache_ttl > 0 ) {
 			$cached = get_transient( $cache_key );
 			if ( false !== $cached ) {
 				return rest_ensure_response( $cached );
@@ -110,9 +127,77 @@ class PreviewProxyController {
 			}
 		}
 
-		set_transient( $cache_key, $payload, self::CACHE_TTL );
+		if ( $cache_ttl > 0 ) {
+			set_transient( $cache_key, $payload, $cache_ttl );
+		}
 
 		return rest_ensure_response( $payload );
+	}
+
+	/**
+	 * The DataSource's declared cache_ttl, in seconds.
+	 *
+	 * An explicit 0 means "do not cache" and is honoured as such. A
+	 * missing / non-numeric / negative value falls back to CACHE_TTL, so
+	 * a source that never thought about caching behaves as it always has.
+	 */
+	protected function resolve_cache_ttl( $template_slug, $ds_slug ) {
+		$snapshot = $this->snapshots->find_by_template_slug( $template_slug );
+		if ( ! $snapshot || ! is_array( $snapshot['snapshot_blob'] ) ) {
+			return self::CACHE_TTL;
+		}
+		$data_sources = isset( $snapshot['snapshot_blob']['data_sources'] )
+			? (array) $snapshot['snapshot_blob']['data_sources']
+			: array();
+		foreach ( $data_sources as $ds ) {
+			if ( ! isset( $ds['slug'] ) || (string) $ds['slug'] !== $ds_slug ) {
+				continue;
+			}
+			if ( ! array_key_exists( 'cache_ttl', $ds ) || ! is_numeric( $ds['cache_ttl'] ) ) {
+				return self::CACHE_TTL;
+			}
+			$ttl = (int) $ds['cache_ttl'];
+			return $ttl < 0 ? self::CACHE_TTL : $ttl;
+		}
+		return self::CACHE_TTL;
+	}
+
+	/**
+	 * Bucket a request's credentials the same way the proxy does, so a
+	 * write arriving on a DIFFERENT route can address the cache the
+	 * reads populated.
+	 *
+	 * The app sends `X-Appza-Auth` on proxy reads and a plain
+	 * `Authorization` on direct fcom-mobile writes, but the VALUE is the
+	 * same credential string in both, which is what gets hashed.
+	 */
+	public static function auth_bucket_for( \WP_REST_Request $request ) {
+		$header = $request->get_header( 'x_appza_auth' );
+		if ( ! is_string( $header ) || '' === $header ) {
+			$header = $request->get_header( 'authorization' );
+		}
+		return ( is_string( $header ) && '' !== $header )
+			? substr( md5( $header ), 0, 12 )
+			: 'anon';
+	}
+
+	/** Current cache generation for a viewer bucket. */
+	public static function generation_for( $auth_bucket ) {
+		return (int) get_option( 'appza_preview_gen_' . $auth_bucket, 0 );
+	}
+
+	/**
+	 * Invalidate every cached read held for one viewer.
+	 *
+	 * Called after that viewer writes something through fcom-mobile. The
+	 * motivating case: the reaction toggle's DIRECTION is computed from
+	 * the row the client is holding, so a stale row does not merely look
+	 * wrong — the next tap sends the OPPOSITE of what the user intended
+	 * and silently removes a like they meant to add.
+	 */
+	public static function bump_generation( $auth_bucket ) {
+		$option = 'appza_preview_gen_' . $auth_bucket;
+		update_option( $option, self::generation_for( $auth_bucket ) + 1, false );
 	}
 
 	/**
