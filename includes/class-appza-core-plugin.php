@@ -22,6 +22,7 @@ use AppzaCore\Plugin\Rest\PreviewCacheInvalidator;
 use AppzaCore\Plugin\Rest\FluentCommunityMediaCap;
 use AppzaCore\Plugin\Rest\FluentCommunityMediaGalleryEnricher;
 use AppzaCore\Plugin\Rest\FluentCommunitySpaceConfigEnricher;
+use AppzaCore\Plugin\Rest\FluentCommunityComposerEnricher;
 use AppzaCore\Plugin\Rest\RestRoutes;
 use AppzaCore\Plugin\Schema\SchemaManager;
 
@@ -124,10 +125,17 @@ class Appza_Core_Plugin {
 		// reads off the row it holds, so a stale row makes the next tap
 		// send the opposite of what was intended.
 		$previewCache = new PreviewCacheInvalidator();
+		// Puts the create-post composer's PER-VIEWER verdicts back on the
+		// space-picker response: whether this viewer may schedule a post
+		// and send the announcement email (global, and per space), and
+		// whether a given space takes attachments. fcom-mobile's lean
+		// transform computes and then drops all three. See class docblock.
+		$fcComposer = new FluentCommunityComposerEnricher();
 		$this->loader->add_action( 'rest_api_init', $rest, 'register_routes' );
 		$this->loader->add_action( 'rest_api_init', $auth, 'register_routes' );
 		$this->loader->add_action( 'rest_api_init', $fcFeedPerms, 'register_hooks' );
 		$this->loader->add_action( 'rest_api_init', $fcSpaceConfig, 'register_hooks' );
+		$this->loader->add_action( 'rest_api_init', $fcComposer, 'register_hooks' );
 		$this->loader->add_action( 'rest_api_init', $fcMediaGallery, 'register_hooks' );
 		$this->loader->add_action( 'rest_api_init', $fcFeed, 'register_hooks' );
 		$this->loader->add_action( 'rest_api_init', $previewCache, 'register_hooks' );

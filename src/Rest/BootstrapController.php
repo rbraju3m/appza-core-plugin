@@ -317,10 +317,9 @@ class BootstrapController {
 	/**
 	 * Surface the FluentCommunity customization settings the mobile
 	 * renderer honors so the app matches whatever the site admin picked
-	 * in Settings → Customization. Currently just member_list_layout
-	 * (classic = list, grid = tile grid); more entries can join here
-	 * (rich_post_layout, default_feed_layout, etc.) as the renderer
-	 * gains support for them.
+	 * in Settings → Customization: member_list_layout (classic = list,
+	 * grid = tile grid) plus, under `composer`, everything the create-post
+	 * screen branches on.
 	 *
 	 * Returns null when FluentCommunity isn't installed so the mobile
 	 * bootstrap loader can distinguish "no FC on this site" from
@@ -367,6 +366,115 @@ class BootstrapController {
 			'bookmarks_enabled'              => $this->bookmarks_enabled(),
 			'bookmarks_visibility'           => $this->bookmarks_visibility(),
 			'bookmarks_membership_ids'       => $this->bookmarks_membership_ids(),
+			// Everything the create-post composer branches on. Grouped
+			// rather than flattened because it is one screen's worth of
+			// settings read from four different FluentCommunity stores.
+			'composer'                       => $this->composer_settings(),
+		);
+	}
+
+	/**
+	 * The create-post composer's feature gates.
+	 *
+	 * Mirrors FluentCommunity's own `PortalHandler::appVars()['features']`
+	 * — the portal composer reads exactly these, so reading anything else
+	 * would put the app and the portal out of step. Every value is a
+	 * property of the SITE. Per-viewer verdicts (may this user schedule a
+	 * post, send an announcement email, upload a video) are deliberately
+	 * NOT resolved here: bootstrap is public-read and cached per template,
+	 * so an answer computed at this point would be whoever warmed the
+	 * cache. Those ride the per-request payload instead, the same split
+	 * the leaderboard and bookmarks visibility settings use (D64).
+	 *
+	 * @return array<string, mixed>
+	 */
+	protected function composer_settings() {
+		$utility = '\\FluentCommunity\\App\\Functions\\Utility';
+		$helper  = '\\FluentCommunity\\App\\Services\\Helper';
+
+		// 'disabled' | 'optional' | 'required'. FluentCommunity's
+		// postTitlePref() maps 'disabled' to an empty string (it is
+		// checked for truthiness at the call site) and runs the
+		// `fluent_community/has_post_title` filter — go through it so a
+		// site that filters the pref gets the same answer in the app as
+		// in its portal, then map the empty string back to a real word.
+		$title_pref = call_user_func( array( $utility, 'postTitlePref' ) );
+		$title_pref = in_array( $title_pref, array( 'optional', 'required' ), true ) ? $title_pref : 'disabled';
+
+		// The RAW customization setting, deliberately not run through
+		// `fluent_community/max_media_per_post`. Our own
+		// FluentCommunityMediaCap raises that filter to 20 so an edit
+		// cannot truncate a post that already carries more images than
+		// the site's limit — a repair valve, not the composer's rule.
+		// Reporting the filtered value would let the picker take 20.
+		$max_media = (int) call_user_func( array( $utility, 'getCustomizationSetting' ), 'max_media_per_post' );
+
+		$layout = call_user_func( array( $utility, 'getCustomizationSetting' ), 'rich_post_layout' );
+
+		$topics_config = class_exists( $helper )
+			? call_user_func( array( $helper, 'getTopicsConfig' ) )
+			: array();
+
+		return array(
+			'post_title_pref'            => $title_pref,
+			// Settings → General → Global Post Status. When off there is
+			// no "On my profile" row on the space picker.
+			'global_posts_enabled'       => class_exists( $helper )
+				? (bool) call_user_func( array( $helper, 'hasGlobalPost' ) )
+				: false,
+			// Customization → Rich Media Post Layout. `modern` puts media
+			// above the author block, `classic` below the body.
+			'rich_post_layout'           => in_array( $layout, array( 'classic', 'modern' ), true ) ? $layout : 'classic',
+			'max_media_per_post'         => $max_media > 0 ? $max_media : 4,
+			// Settings → Email Notification → announcement mail. Whether
+			// the checkbox exists at all; whether THIS viewer may tick it
+			// is a moderator question answered per request.
+			'announcement_email_enabled' => (bool) call_user_func( array( $utility, 'hasEmailAnnouncementEnabled' ) ),
+			// FluentCommunity hardcodes has_survey_poll to true; kept as
+			// a key so a future switch has somewhere to land.
+			'survey_enabled'             => (bool) apply_filters( 'fluent_community/has_survey_poll', true ),
+			'video_embed_enabled'        => (bool) apply_filters( 'fluent_community/has_video_embeder', true ),
+			'inline_image_upload'        => 'yes' === apply_filters( 'fluent_community/has_inline_image_upload', 'yes' ),
+			'topics_enabled'             => (bool) call_user_func( array( $utility, 'getTopics' ) ),
+			'max_topics_per_post'        => max( 1, (int) ( $topics_config['max_topics_per_post'] ?? 1 ) ),
+			'fluent_player'              => $this->fluent_player_settings(),
+		);
+	}
+
+	/**
+	 * FluentPlayer's half of the composer: the Upload Video tab and the
+	 * audio glyph both exist only because of it.
+	 *
+	 * `video_upload_role` ships RAW for the same reason
+	 * `bookmarks_visibility` does — it is a question about the viewer, and
+	 * the shells are where the auth state is actually known.
+	 *
+	 * @return array<string, mixed>|null  null when the integration is absent.
+	 */
+	protected function fluent_player_settings() {
+		$bootstrap = '\\FluentCommunity\\Modules\\Integrations\\FluentPlayer\\Bootstrap';
+		if ( ! class_exists( $bootstrap ) ) {
+			return null;
+		}
+
+		$status = call_user_func( array( $bootstrap, 'getPluginStatus' ) );
+		if ( 'active' !== $status ) {
+			return array(
+				'status'  => is_string( $status ) ? $status : 'not_installed',
+				'enabled' => false,
+			);
+		}
+
+		$settings = call_user_func( array( $bootstrap, 'getSettings' ) );
+
+		return array(
+			'status'               => 'active',
+			'enabled'              => 'yes' === ( $settings['enable_fluent_player'] ?? 'no' ),
+			'video_upload_enabled' => 'yes' === ( $settings['video_upload'] ?? 'no' ),
+			'video_upload_role'    => (string) ( $settings['video_upload_role'] ?? 'admin' ),
+			'audio_upload_enabled' => 'yes' === ( $settings['enable_audio'] ?? 'no' ),
+			'max_audios_per_post'  => (int) call_user_func( array( $bootstrap, 'maxAudiosPerPost' ) ),
+			'play_embedded_videos' => 'yes' === ( $settings['play_embedded_videos'] ?? 'no' ),
 		);
 	}
 
