@@ -143,22 +143,86 @@ class FluentCommunityComposerEnricher {
 
 		$models = $this->load_spaces( array_values( array_unique( $slugs ) ), $user );
 
+		$is_moderator = (bool) call_user_func( array( '\\FluentCommunity\\App\\Services\\Helper', 'isModerator' ) )
+			|| (bool) call_user_func( array( '\\FluentCommunity\\App\\Services\\Helper', 'isSiteAdmin' ) );
+
 		foreach ( $groups as $gi => $group ) {
 			$group = (array) $group;
 			foreach ( (array) ( $group['spaces'] ?? array() ) as $si => $space ) {
 				$space                  = (array) $space;
 				$slug                   = (string) ( $space['slug'] ?? '' );
+				$model                  = $models[ $slug ] ?? null;
 				$space['permissions']   = $this->space_permissions(
 					isset( $space['permissions'] ) ? (array) $space['permissions'] : array(),
-					$models[ $slug ] ?? null,
+					$model,
 					$user
 				);
+				$space['topics']        = $this->space_topics( $model, $is_moderator );
+				$space['topic_required'] = $this->topic_required( $model );
 				$group['spaces'][ $si ] = $space;
 			}
 			$groups[ $gi ] = $group;
 		}
 
 		return $groups;
+	}
+
+	/**
+	 * The topic chips the composer draws once this space is picked.
+	 *
+	 * Costs nothing per space: FluentCommunity's `Utility::getTopics()`
+	 * is a single cached query for EVERY topic on the site, and
+	 * `getTopicsBySpaceId()` filters that in memory. So attaching them to
+	 * every row is cheaper than fetching the space's detail after each
+	 * selection, which is what the composer would otherwise have to do —
+	 * once per space the user tries.
+	 *
+	 * `admin_only` topics are dropped for anyone who is not a moderator.
+	 * FluentCommunity flags them on the topic itself, and a chip a member
+	 * cannot post under should not be offered.
+	 *
+	 * @param object|null $space
+	 * @return array<int, array<string, mixed>>
+	 */
+	protected function space_topics( $space, $is_moderator ) {
+		if ( ! $space || ! class_exists( '\\FluentCommunity\\App\\Functions\\Utility' ) ) {
+			return array();
+		}
+
+		$topics = call_user_func(
+			array( '\\FluentCommunity\\App\\Functions\\Utility', 'getTopicsBySpaceId' ),
+			$space->id
+		);
+
+		$out = array();
+		foreach ( (array) $topics as $topic ) {
+			$topic = (array) $topic;
+			if ( ! $is_moderator && 'yes' === ( $topic['admin_only'] ?? 'no' ) ) {
+				continue;
+			}
+			$out[] = array(
+				'id'    => (string) ( $topic['id'] ?? '' ),
+				'title' => (string) ( $topic['title'] ?? '' ),
+				'slug'  => (string) ( $topic['slug'] ?? '' ),
+			);
+		}
+
+		return $out;
+	}
+
+	/**
+	 * The space's own "topic required" switch, which decides whether the
+	 * composer may post without a chip selected.
+	 *
+	 * @param object|null $space
+	 */
+	protected function topic_required( $space ) {
+		if ( ! $space ) {
+			return false;
+		}
+		$settings = (array) $space->settings;
+
+		return 'yes' === ( $settings['topic_required'] ?? 'no' );
 	}
 
 	/**
