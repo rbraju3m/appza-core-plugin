@@ -485,6 +485,23 @@ class PreviewProxyController {
 				isset( $items[ $i ]['created_at'] ) ? $items[ $i ]['created_at'] : '',
 				isset( $item['space'] ) ? $item['space'] : null
 			);
+			// The inline comments the card draws under the action strip
+			// (designs 19, 26). Two jobs FluentCommunity does not do for
+			// us: a PINNED comment has to come first, and each row needs
+			// the same relative timestamp the post above it uses.
+			if ( ! empty( $item['comments'] ) && is_array( $item['comments'] ) ) {
+				$items[ $i ]['comments'] = $this->normalize_comments(
+					$items[ $i ]['comments'],
+					isset( $item['permalink'] ) && is_string( $item['permalink'] ) ? $item['permalink'] : ''
+				);
+			}
+			// The stacked reaction avatars beside the counts (design 19).
+			// Derived here rather than bound straight to `reactions[]`
+			// because the card wants FACES, capped, and the raw array is
+			// every reaction row with a whole xprofile hanging off it.
+			if ( ! empty( $item['reactions'] ) && is_array( $item['reactions'] ) ) {
+				$items[ $i ]['reaction_avatars'] = $this->build_reaction_avatars( $item['reactions'] );
+			}
 			// EMPTY, not "0 likes", when nothing has happened yet.
 			//
 			// Noor's designs 1-6 draw the action strip with no counts at
@@ -688,6 +705,97 @@ class PreviewProxyController {
 
 	protected function pluralize( $n, $singular, $plural ) {
 		return $n . ' ' . ( 1 === $n ? $singular : $plural );
+	}
+
+	/**
+	 * Inline comments, ready for the card: pinned first, relative times.
+	 *
+	 * FluentCommunity returns them in creation order with a raw
+	 * `created_at` and an `is_sticky` flag nobody has acted on. Design 26
+	 * puts the pinned one at the top of the strip, and its own controller
+	 * un-sticks every other comment on the post when one is pinned — so
+	 * "pinned first" can only ever move ONE row, and a stable sort keeps
+	 * the rest in the order FC chose.
+	 *
+	 * @param array  $comments
+	 * @param string $postPermalink The parent post's URL, for comment links.
+	 * @return array
+	 */
+	protected function normalize_comments( array $comments, $postPermalink = '' ) {
+		foreach ( $comments as $i => $comment ) {
+			if ( ! is_array( $comment ) ) {
+				continue;
+			}
+			if ( isset( $comment['created_at'] ) && is_string( $comment['created_at'] ) && '' !== $comment['created_at'] ) {
+				$comments[ $i ]['created_at'] = $this->relative_time( $comment['created_at'] );
+			}
+			if ( isset( $comment['message_rendered'] ) && is_string( $comment['message_rendered'] ) ) {
+				$comments[ $i ]['message_rendered'] = $this->sanitize_rich_text( $comment['message_rendered'] );
+			}
+			// "Copy link" on a comment (design 24). FluentCommunity gives
+			// a comment no permalink of its own — the portal links to the
+			// post and anchors to the comment, so we build the same thing
+			// rather than inventing a route that would 404.
+			if ( '' !== $postPermalink && isset( $comment['id'] ) ) {
+				$comments[ $i ]['permalink'] = $postPermalink . '#comment-' . (int) $comment['id'];
+			}
+		}
+
+		// usort is NOT stable before PHP 8.0; this box runs 8+, where it
+		// is. Comparing only the sticky flag therefore leaves equal rows
+		// in FluentCommunity's own order rather than reversing them.
+		usort(
+			$comments,
+			static function ( $a, $b ) {
+				$sa = ( is_array( $a ) && ! empty( $a['is_sticky'] ) ) ? 1 : 0;
+				$sb = ( is_array( $b ) && ! empty( $b['is_sticky'] ) ) ? 1 : 0;
+				return $sb <=> $sa;
+			}
+		);
+
+		return $comments;
+	}
+
+	/**
+	 * The stacked faces beside "2 likes · 3 comments" (design 19).
+	 *
+	 * Capped at four: the design draws two and the stack stops reading as
+	 * a stack much beyond that. De-duplicated by user, because one person
+	 * who both liked and bookmarked a post is one face, not two.
+	 *
+	 * @param array $reactions
+	 * @return array<int, array{user_id:int, avatar:string, display_name:string}>
+	 */
+	protected function build_reaction_avatars( array $reactions ) {
+		$out = [];
+		foreach ( $reactions as $reaction ) {
+			if ( ! is_array( $reaction ) ) {
+				continue;
+			}
+			// Bookmarks live in the same table as likes. A private
+			// bookmark must not put someone's face on a public post.
+			if ( isset( $reaction['type'] ) && 'like' !== $reaction['type'] ) {
+				continue;
+			}
+			$profile = isset( $reaction['xprofile'] ) && is_array( $reaction['xprofile'] ) ? $reaction['xprofile'] : [];
+			$uid     = isset( $profile['user_id'] ) ? (int) $profile['user_id'] : 0;
+			$avatar  = isset( $profile['avatar'] ) && is_string( $profile['avatar'] ) ? $profile['avatar'] : '';
+			if ( $uid <= 0 || '' === $avatar || isset( $out[ $uid ] ) ) {
+				continue;
+			}
+			$out[ $uid ] = [
+				'user_id'      => $uid,
+				'avatar'       => $avatar,
+				'display_name' => isset( $profile['display_name'] ) && is_string( $profile['display_name'] )
+					? $profile['display_name']
+					: '',
+			];
+			if ( count( $out ) >= 4 ) {
+				break;
+			}
+		}
+
+		return array_values( $out );
 	}
 
 	/**

@@ -216,7 +216,71 @@ class FluentCommunityFeedPermissionsFilter {
 			'can_remove_preview'   => $canDelete,
 		];
 
+		// Each inline COMMENT gets its own bag. Noor's item 24 gives the
+		// comment menu a different matrix from the post's, and it is a
+		// different matrix in FluentCommunity too:
+		//
+		//   edit    CommentsController::update() — author OR
+		//           `edit_any_comment` in the post's space.
+		//   delete  CommentsController::delete() — author OR
+		//           `delete_any_comment` in the post's space.
+		//   pin     CommentsController::patch()  — moderator or admin
+		//           ONLY. Not the author, which is where this differs
+		//           most from the post menu.
+		//   report  any signed-in reader who did not write it.
+		if ( ! empty( $feed['comments'] ) && is_array( $feed['comments'] ) ) {
+			foreach ( $feed['comments'] as $i => $comment ) {
+				if ( is_array( $comment ) ) {
+					$feed['comments'][ $i ]['permissions'] = $this->comment_permissions(
+						$comment,
+						$currentUser,
+						$space,
+						$canModerate
+					);
+				}
+			}
+		}
+
 		return $feed;
+	}
+
+	/**
+	 * @param array                                     $comment
+	 * @param \FluentCommunity\App\Models\User|null   $user
+	 * @param \FluentCommunity\App\Models\Space|null  $space  The POST's space — a comment has none of its own.
+	 * @param bool                                      $canModerate
+	 * @return array<string, bool>
+	 */
+	protected function comment_permissions( array $comment, $user, $space, $canModerate ) {
+		if ( ! $user ) {
+			// Signed out: every verdict false, which collapses the menu
+			// to Copy link on its own — the same rule the post menu
+			// follows for a guest (design 22's logout case).
+			return [
+				'is_author'  => false,
+				'can_edit'   => false,
+				'can_delete' => false,
+				'can_pin'    => false,
+				'can_report' => false,
+			];
+		}
+
+		$isAuthor = isset( $comment['user_id'] ) && (int) $comment['user_id'] === (int) $user->ID;
+
+		$mayEdit   = $isAuthor;
+		$mayDelete = $isAuthor;
+		if ( ! $isAuthor && $space ) {
+			$mayEdit   = (bool) $user->can( 'edit_any_comment', $space );
+			$mayDelete = (bool) $user->can( 'delete_any_comment', $space );
+		}
+
+		return [
+			'is_author'  => $isAuthor,
+			'can_edit'   => $mayEdit,
+			'can_delete' => $mayDelete,
+			'can_pin'    => (bool) $canModerate,
+			'can_report' => ! $isAuthor,
+		];
 	}
 
 	/**
