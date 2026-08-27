@@ -425,6 +425,7 @@ class PreviewProxyController {
 		// but bookmark reactions are stored in the same table, so this is
 		// the only place the renderer can learn bookmark state.
 		$my_reactions_by_feed = array();
+		$my_votes_by_feed     = array();
 		if ( $viewer_id > 0 ) {
 			$feed_ids = array();
 			foreach ( $items as $it ) {
@@ -447,6 +448,34 @@ class PreviewProxyController {
 								$my_reactions_by_feed[ $fid ] = array();
 							}
 							$my_reactions_by_feed[ $fid ][] = $type;
+						}
+					}
+				}
+				// The viewer's own SURVEY VOTES, batched the same way.
+				//
+				// A separate query because a survey vote is shaped
+				// differently from a like: `type` is 'survey_vote' and
+				// `object_type` carries the OPTION SLUG rather than the
+				// literal 'feed', so the query above cannot see them.
+				//
+				// This is the whole difference between Noor's designs 8
+				// and 9 (and 11 and 12): both draw a filled bar on the
+				// winning option, and only the viewer's own vote fills
+				// the radio. FluentCommunity's feed payload ships neither
+				// the votes nor a flag, so before this the two states
+				// were indistinguishable and every voted poll rendered as
+				// design 9.
+				$sql = "SELECT object_id, object_type FROM {$wpdb->prefix}fcom_post_reactions WHERE type = 'survey_vote' AND user_id = %d AND object_id IN ($placeholders)";
+				$rows = $wpdb->get_results( $wpdb->prepare( $sql, $params ), ARRAY_A );
+				if ( is_array( $rows ) ) {
+					foreach ( $rows as $r ) {
+						$fid  = isset( $r['object_id'] ) ? (int) $r['object_id'] : 0;
+						$slug = isset( $r['object_type'] ) ? (string) $r['object_type'] : '';
+						if ( $fid && '' !== $slug ) {
+							if ( ! isset( $my_votes_by_feed[ $fid ] ) ) {
+								$my_votes_by_feed[ $fid ] = array();
+							}
+							$my_votes_by_feed[ $fid ][] = $slug;
 						}
 					}
 				}
@@ -485,6 +514,17 @@ class PreviewProxyController {
 				isset( $items[ $i ]['created_at'] ) ? $items[ $i ]['created_at'] : '',
 				isset( $item['space'] ) ? $item['space'] : null
 			);
+			// Mark the options this viewer voted for, and normalise the
+			// two count fields FluentCommunity leaves OUT when they are
+			// zero — an option nobody picked has no `vote_counts` and no
+			// `percentage` key at all, so the card had nothing to bind
+			// and drew a blank where "0%" belongs.
+			if ( isset( $item['content_type'] ) && 'survey' === $item['content_type'] ) {
+				$items[ $i ]['meta'] = $this->normalize_survey(
+					isset( $items[ $i ]['meta'] ) && is_array( $items[ $i ]['meta'] ) ? $items[ $i ]['meta'] : array(),
+					isset( $my_votes_by_feed[ (int) $item['id'] ] ) ? $my_votes_by_feed[ (int) $item['id'] ] : array()
+				);
+			}
 			// The inline comments the card draws under the action strip
 			// (designs 19, 26). Two jobs FluentCommunity does not do for
 			// us: a PINNED comment has to come first, and each row needs
@@ -705,6 +745,64 @@ class PreviewProxyController {
 
 	protected function pluralize( $n, $singular, $plural ) {
 		return $n . ' ' . ( 1 === $n ? $singular : $plural );
+	}
+
+	/**
+	 * A survey post's options, ready for the card.
+	 *
+	 * Three jobs, all of them things FluentCommunity leaves to whoever
+	 * draws the poll:
+	 *
+	 *   voted        whether THIS viewer picked the option. The votes are
+	 *                Reaction rows and never reach the feed payload;
+	 *                without this, designs 8 and 9 are the same picture.
+	 *   vote_counts  absent, not 0, on an option nobody picked.
+	 *   percentage   likewise. Recomputed here rather than trusted,
+	 *                because FC writes it at vote time and an option
+	 *                added later carries a stale share.
+	 *
+	 * `total_votes` is the "N Vote" line under the options. It counts
+	 * VOTES, not voters — a multi-choice poll lets one person cast
+	 * several, and design 11 shows 3 for two voters' picks.
+	 *
+	 * @param array $meta
+	 * @param array<int, string> $myVotes Option slugs this viewer picked.
+	 * @return array
+	 */
+	protected function normalize_survey( array $meta, array $myVotes ) {
+		if ( empty( $meta['survey_config']['options'] ) || ! is_array( $meta['survey_config']['options'] ) ) {
+			return $meta;
+		}
+
+		$options = $meta['survey_config']['options'];
+		$total   = 0;
+		foreach ( $options as $option ) {
+			if ( is_array( $option ) ) {
+				$total += isset( $option['vote_counts'] ) ? (int) $option['vote_counts'] : 0;
+			}
+		}
+
+		foreach ( $options as $i => $option ) {
+			if ( ! is_array( $option ) ) {
+				continue;
+			}
+			$count = isset( $option['vote_counts'] ) ? (int) $option['vote_counts'] : 0;
+			$slug  = isset( $option['slug'] ) ? (string) $option['slug'] : '';
+
+			$options[ $i ]['vote_counts'] = $count;
+			$options[ $i ]['percentage']  = $total > 0 ? (int) round( ( $count / $total ) * 100 ) : 0;
+			$options[ $i ]['voted']       = '' !== $slug && in_array( $slug, $myVotes, true );
+		}
+
+		$meta['survey_config']['options']     = $options;
+		$meta['survey_config']['total_votes'] = $total;
+		// Whether the viewer has voted AT ALL. The row control is filled
+		// only for the options they picked, but the poll as a whole
+		// changes state on the first vote — which is what tells design 7
+		// (nobody has voted) from design 9 (someone has, not me).
+		$meta['survey_config']['has_voted'] = ! empty( $myVotes );
+
+		return $meta;
 	}
 
 	/**
