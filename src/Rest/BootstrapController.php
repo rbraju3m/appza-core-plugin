@@ -370,6 +370,134 @@ class BootstrapController {
 			// rather than flattened because it is one screen's worth of
 			// settings read from four different FluentCommunity stores.
 			'composer'                       => $this->composer_settings(),
+			// Customization -> Feed Layout / Feed Sort By, plus the two
+			// switches that take the controls away from the user.
+			'feed'                           => $this->feed_settings(),
+			// Who may see the app at all without signing in. Raw, and
+			// resolved by the shells — see the note on the method.
+			'access'                         => $this->access_settings(),
+		);
+	}
+
+	/**
+	 * Settings -> Customization -> the feed block.
+	 *
+	 * Four keys Noor named directly (designs 20 + 21): the default layout
+	 * and sort, and the two switches that hide the pickers. All four have
+	 * lived in `customization_settings` since FluentCommunity shipped them
+	 * and were read by NOTHING on our side until this arc.
+	 *
+	 * Every value here is a property of the SITE. The one per-viewer part
+	 * of that screen — the "Following" sort row, which FluentCommunity Pro
+	 * appends only for a logged-in user on a site with the followers
+	 * module on — is deliberately NOT resolved here. Bootstrap is
+	 * public-read and cached per template, so an answer computed at this
+	 * point would be whoever warmed the cache (P105). The MODULE flag
+	 * ships instead, and the shells combine it with the auth state they
+	 * already hold.
+	 *
+	 * @return array<string, mixed>
+	 */
+	protected function feed_settings() {
+		$utility = '\\FluentCommunity\\App\\Functions\\Utility';
+		$helper  = '\\FluentCommunity\\App\\Services\\Helper';
+
+		$layout = call_user_func( array( $utility, 'getCustomizationSetting' ), 'default_feed_layout' );
+		$layout = in_array( $layout, array( 'timeline', 'list', 'card' ), true ) ? $layout : 'timeline';
+
+		// The site's own sort list, MINUS anything a per-viewer filter
+		// added. FluentCommunity Pro's FollowHandler hooks
+		// `fluent_community/post_order_options` and appends `following`
+		// when `is_user_logged_in()` — running that here would bake the
+		// cache-warmer's session into every later bootstrap.
+		$sort_options = array();
+		if ( class_exists( $helper ) ) {
+			foreach ( (array) call_user_func( array( $helper, 'getPostOrderOptions' ), 'feed' ) as $value => $label ) {
+				if ( 'following' === $value ) {
+					continue;
+				}
+				$sort_options[] = array(
+					'value' => (string) $value,
+					'label' => (string) $label,
+				);
+			}
+		}
+
+		$sort_values  = wp_list_pluck( $sort_options, 'value' );
+		$default_sort = call_user_func( array( $utility, 'getCustomizationSetting' ), 'default_feed_sort_by' );
+		// FluentCommunity stores "no preference" as an empty string and
+		// the portal falls back to Latest. Keep the empty string on the
+		// wire rather than substituting — the shells need to tell "the
+		// admin picked Latest" from "the admin picked nothing", because
+		// only the first survives a future change of default.
+		$default_sort = in_array( $default_sort, $sort_values, true ) ? $default_sort : '';
+
+		$topics_config = class_exists( $helper )
+			? (array) call_user_func( array( $helper, 'getTopicsConfig' ) )
+			: array();
+
+		return array(
+			'default_layout'             => $layout,
+			'layout_change_disabled'     => 'yes' === call_user_func( array( $utility, 'getCustomizationSetting' ), 'disable_feed_layout' ),
+			'default_sort_by'            => $default_sort,
+			'sort_change_disabled'       => 'yes' === call_user_func( array( $utility, 'getCustomizationSetting' ), 'disable_feed_sort_by' ),
+			'sort_options'               => $sort_options,
+			// Features -> Followers Module. Half of the "Following" sort
+			// row; the other half is the viewer being signed in.
+			'followers_module_enabled'   => class_exists( $helper )
+				? (bool) call_user_func( array( $helper, 'isFeatureEnabled' ), 'followers_module' )
+				: false,
+			// Features -> Content Moderation. Gates the whole In-Review
+			// surface (Noor's designs 27-34); when off, no post can be
+			// pending and the review affordances never draw.
+			'content_moderation_enabled' => class_exists( $helper )
+				? (bool) call_user_func( array( $helper, 'isFeatureEnabled' ), 'content_moderation' )
+				: false,
+			// Topics -> "Show topics on post card". The # pill in design 14.
+			'show_topic_on_post_card'    => 'no' !== ( $topics_config['show_on_post_card'] ?? 'yes' ),
+		);
+	}
+
+	/**
+	 * What a signed-OUT visitor is allowed to reach.
+	 *
+	 * Noor's rule for the guest arc: reachability follows the PORTAL, never
+	 * a list hardcoded in the app. If the admin locks the community down,
+	 * the app has to lock down with it — so these ship RAW and the shells
+	 * resolve them against the auth state they hold.
+	 *
+	 * `access_level` is FluentCommunity's own `access.acess_level`
+	 * (note its spelling — that typo is in their schema and is the real
+	 * key). `public` lets a guest read; `logged_in` and `role_based` do
+	 * not. The four privacy keys are the per-surface answers: a community
+	 * can be public while its member list is not.
+	 *
+	 * Resolving any of this here would be wrong twice over — bootstrap is
+	 * cached per template, and `role_based` is a question about a viewer
+	 * this request does not have.
+	 *
+	 * @return array<string, mixed>
+	 */
+	protected function access_settings() {
+		$helper = '\\FluentCommunity\\App\\Services\\Helper';
+		$utility = '\\FluentCommunity\\App\\Functions\\Utility';
+
+		$general = class_exists( $helper )
+			? (array) call_user_func( array( $helper, 'generalSettings' ) )
+			: array();
+
+		$level = $general['access']['acess_level'] ?? 'public';
+
+		$privacy = array();
+		foreach ( array( 'members_page_status', 'profile_page_visibility', 'user_space_visibility', 'leaderboard_members_visibility' ) as $key ) {
+			$privacy[ $key ] = class_exists( $utility )
+				? (string) call_user_func( array( $utility, 'getPrivacySetting' ), $key )
+				: '';
+		}
+
+		return array(
+			'access_level' => in_array( $level, array( 'public', 'logged_in', 'role_based' ), true ) ? $level : 'public',
+			'privacy'      => $privacy,
 		);
 	}
 

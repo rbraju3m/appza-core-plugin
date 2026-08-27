@@ -154,8 +154,11 @@ class FluentCommunityFeedPermissionsFilter {
 			$currentUserResolved = true;
 		}
 
-		$isAuthor = false;
+		$isAuthor    = false;
 		$canModerate = false;
+		$canEdit     = false;
+		$canDelete   = false;
+		$space       = null;
 
 		if ( $currentUser ) {
 			$isAuthor = isset( $feed['user_id'] ) && (int) $feed['user_id'] === (int) $currentUser->ID;
@@ -172,23 +175,92 @@ class FluentCommunityFeedPermissionsFilter {
 					$canModerate = $isMod || $isAdmin;
 				}
 			}
+
+			$canEdit   = $this->can_edit( $currentUser, $feed, $space );
+			$canDelete = $this->can_delete( $currentUser, $isAuthor, $space );
 		}
 
-		// Author-only for edit / delete / comments-toggle — even a space
-		// moderator or admin cannot mutate a post they didn't write. Pin
-		// (top + sidebar) stays moderator-scoped since those are curation
-		// actions on the space itself, not on the post's content. Report
-		// is available to any logged-in non-author.
+		// Every verdict below mirrors FluentCommunity's OWN rule, read out
+		// of its code rather than reasoned about — so the app offers a menu
+		// row exactly when the portal would, and never one the API will
+		// refuse. The three that are NOT simply `is_author`:
+		//
+		//   edit             Feed::hasEditAccess()  — author OR the
+		//                    `edit_any_feed` permission, space-scoped when
+		//                    the post lives in a space.
+		//   delete           User::canDeleteFeed()  — author OR
+		//                    `delete_any_feed`, community OR space scope.
+		//   disable comments FeedsController::patchFeed() — author OR
+		//                    moderator OR admin. Pin (top + sidebar) is
+		//                    moderator-only in the same method, which is
+		//                    why it is `can_moderate` and this is not.
+		//
+		// This used to read `is_author` for all three, which hid Edit and
+		// Delete from an admin looking at someone else's post — the exact
+		// case Noor's design 22 turns on.
 		$feed['permissions'] = [
 			'is_author'            => $isAuthor,
-			'can_edit'             => $isAuthor,
-			'can_delete'           => $isAuthor,
+			'can_edit'             => $canEdit,
+			'can_delete'           => $canDelete,
 			'can_moderate'         => $canModerate,
 			'can_pin'              => $canModerate,
-			'can_report'           => $currentUser && ! $isAuthor,
-			'can_disable_comments' => $isAuthor,
+			'can_report'           => (bool) $currentUser && ! $isAuthor,
+			'can_disable_comments' => $isAuthor || $canModerate,
+			// "Remove Preview" (design 22). FluentCommunity guards
+			// deleteMediaPreview() with canDeleteFeed(), the same rule as
+			// deleting the post — so whoever may delete the post may strip
+			// its preview. The MENU row is additionally gated on the post
+			// actually having one; that is a property of the post, not of
+			// the viewer, so it is answered in the catalog's visible_when
+			// rather than folded in here.
+			'can_remove_preview'   => $canDelete,
 		];
 
 		return $feed;
+	}
+
+	/**
+	 * Feed::hasEditAccess(), reimplemented against the ROW rather than the
+	 * model — the row is what we have, and re-finding every Feed to ask it
+	 * would be one query per card.
+	 *
+	 * @param \FluentCommunity\App\Models\User        $user
+	 * @param array                                     $feed
+	 * @param \FluentCommunity\App\Models\Space|null  $space
+	 */
+	protected function can_edit( $user, array $feed, $space ) {
+		if ( isset( $feed['user_id'] ) && (int) $feed['user_id'] === (int) $user->ID ) {
+			return true;
+		}
+
+		// A post with a space asks the space; a profile post asks the
+		// community. FluentCommunity branches on `space_id` being set, not
+		// on the space resolving — a post pointing at a deleted space is
+		// not silently promoted to a community-wide question.
+		if ( ! empty( $feed['space_id'] ) ) {
+			return $space ? (bool) $user->hasSpacePermission( 'edit_any_feed', $space ) : false;
+		}
+
+		return (bool) $user->hasCommunityPermission( 'edit_any_feed' );
+	}
+
+	/**
+	 * User::canDeleteFeed(). Unlike edit, FluentCommunity checks BOTH
+	 * scopes here — a community-level `delete_any_feed` reaches a post in
+	 * any space.
+	 *
+	 * @param \FluentCommunity\App\Models\User        $user
+	 * @param bool                                      $isAuthor
+	 * @param \FluentCommunity\App\Models\Space|null  $space
+	 */
+	protected function can_delete( $user, $isAuthor, $space ) {
+		if ( $isAuthor ) {
+			return true;
+		}
+		if ( $user->hasCommunityPermission( 'delete_any_feed' ) ) {
+			return true;
+		}
+
+		return $space ? (bool) $user->hasSpacePermission( 'delete_any_feed', $space ) : false;
 	}
 }
