@@ -468,11 +468,40 @@ class PreviewProxyController {
 			if ( isset( $item['created_at'] ) && is_string( $item['created_at'] ) && '' !== $item['created_at'] ) {
 				$items[ $i ]['created_at'] = $this->relative_time( $item['created_at'] );
 			}
+			// The author byline as ONE string — "4h · Appza Community".
+			//
+			// The card used to draw this as two children sharing a grid
+			// cell, the space name shoved right with `padding-left: 32px`.
+			// That holds only while the timestamp is narrower than 32px:
+			// "4h" fits, "12mo" overlaps. A grid cell cannot lay two
+			// blockified items out in a row, so the honest place to join
+			// them is here, next to the relative time this already
+			// derives.
+			//
+			// Falls back to the time alone when the post has no space —
+			// a profile post has none, and " · " with nothing after it
+			// reads as a bug.
+			$items[ $i ]['byline'] = $this->build_byline(
+				isset( $items[ $i ]['created_at'] ) ? $items[ $i ]['created_at'] : '',
+				isset( $item['space'] ) ? $item['space'] : null
+			);
+			// EMPTY, not "0 likes", when nothing has happened yet.
+			//
+			// Noor's designs 1-6 draw the action strip with no counts at
+			// all on a post with none, and only design 18 onward shows
+			// them. An empty string is what makes that expressible in the
+			// catalog: `visible_when exists` treats '' as absent, so the
+			// child disappears without needing a numeric comparison the
+			// clause grammar does not have.
 			if ( isset( $item['reactions_count'] ) && is_numeric( $item['reactions_count'] ) ) {
-				$items[ $i ]['reactions_summary'] = $this->pluralize( (int) $item['reactions_count'], 'like', 'likes' );
+				$items[ $i ]['reactions_summary'] = (int) $item['reactions_count'] > 0
+					? $this->pluralize( (int) $item['reactions_count'], 'like', 'likes' )
+					: '';
 			}
 			if ( isset( $item['comments_count'] ) && is_numeric( $item['comments_count'] ) ) {
-				$items[ $i ]['comments_summary'] = $this->pluralize( (int) $item['comments_count'], 'comment', 'comments' );
+				$items[ $i ]['comments_summary'] = (int) $item['comments_count'] > 0
+					? $this->pluralize( (int) $item['comments_count'], 'comment', 'comments' )
+					: '';
 			}
 			// Multi-image posts arrive on `meta.media_items` (array).
 			// Single-image posts arrive on `meta.media_preview` with
@@ -659,6 +688,34 @@ class PreviewProxyController {
 
 	protected function pluralize( $n, $singular, $plural ) {
 		return $n . ' ' . ( 1 === $n ? $singular : $plural );
+	}
+
+	/**
+	 * "4h · Appza Community", or "4h" on a post with no space.
+	 *
+	 * The separator is U+00B7 MIDDLE DOT with hair spaces either side —
+	 * the same glyph FluentCommunity's own portal byline uses, so the app
+	 * and the portal read identically.
+	 *
+	 * @param string $when  Already-relative time ("4h", "1d").
+	 * @param mixed  $space The row's `space` object, or null.
+	 */
+	protected function build_byline( $when, $space ) {
+		$when = is_string( $when ) ? trim( $when ) : '';
+
+		$title = '';
+		if ( is_array( $space ) && isset( $space['title'] ) && is_string( $space['title'] ) ) {
+			$title = trim( $space['title'] );
+		}
+
+		if ( '' === $title ) {
+			return $when;
+		}
+		if ( '' === $when ) {
+			return $title;
+		}
+
+		return $when . ' · ' . $title;
 	}
 
 	/**
