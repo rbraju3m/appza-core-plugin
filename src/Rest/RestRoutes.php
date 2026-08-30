@@ -180,6 +180,26 @@ class RestRoutes {
 			)
 		);
 
+		// "Remove Preview" from the post 3-dot menu (design 22). Same
+		// namespace rationale as the invitation routes below: FC has this
+		// as DELETE feeds/{id}/media-preview behind its OWN router, which
+		// is unreachable from here, and fcom-mobile ships nothing for it.
+		// POST rather than DELETE to match every other fcom-mobile
+		// mutation the catalog wires.
+		$media_preview = new FluentCommunityFeedMediaPreviewController();
+		register_rest_route(
+			'fcom-mobile/api/v1',
+			'/feeds/remove-preview',
+			array(
+				'methods'             => \WP_REST_Server::CREATABLE,
+				'callback'            => array( $media_preview, 'destroy' ),
+				'permission_callback' => array( $media_preview, 'permission_check' ),
+				'args'                => array(
+					'feed_id' => array( 'type' => 'integer', 'required' => true ),
+				),
+			)
+		);
+
 		// Space invitations for the Invite User modal. Same namespace
 		// rationale as /users/search below — fcom-mobile ships no
 		// invitation endpoints of its own and is third-party, so we
