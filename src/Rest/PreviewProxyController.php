@@ -127,6 +127,21 @@ class PreviewProxyController {
 			}
 		}
 
+		// Feed links carry their icon in one of THREE fields — an emoji,
+		// an uploaded image URL, or raw inline SVG markup — and a chip
+		// can bind one image source, not three. Resolve them to a single
+		// `link_icon_url` here, turning the SVG into a data URI so the
+		// same <img> draws it; the emoji stays its own field because it
+		// is text, not an image.
+		if ( 'fc-feed-links' === $ds_slug && is_array( $payload ) ) {
+			foreach ( $payload as $i => $item ) {
+				if ( ! is_array( $item ) ) {
+					continue;
+				}
+				$payload[ $i ]['link_icon_url'] = $this->resolve_link_icon( $item );
+			}
+		}
+
 		if ( $cache_ttl > 0 ) {
 			set_transient( $cache_key, $payload, $cache_ttl );
 		}
@@ -614,7 +629,10 @@ class PreviewProxyController {
 			// items by the shape (privacy + slug present) and substitute the
 			// FC placeholder so fc-space-card renders a visual cover instead
 			// of the "Image" empty-state block.
-			$has_space_shape = isset( $item['privacy'] ) && isset( $item['slug'] );
+			// `id` joins the test because a FEED LINK also carries privacy
+			// and slug, and was being handed a space's cover placeholder it
+			// has no use for. A space always has an id; a link never does.
+			$has_space_shape = isset( $item['privacy'] ) && isset( $item['slug'] ) && isset( $item['id'] );
 			$cover_missing = ! isset( $item['cover_photo'] ) || null === $item['cover_photo'] || '' === $item['cover_photo'];
 			if ( $has_space_shape && $cover_missing ) {
 				$fc_placeholder_file = WP_PLUGIN_DIR . '/fluent-community/assets/images/space-placeholder.jpg';
@@ -745,6 +763,38 @@ class PreviewProxyController {
 	 * @param string $noun 'post' | 'comment'
 	 * @return array
 	 */
+	/**
+	 * One image source for a feed link's chip.
+	 *
+	 * FluentCommunity's link shape (CustomSanitizer::santizeLinkItem)
+	 * offers `emoji`, `icon_image` and `shape_svg`, and a chip can bind
+	 * one image. `icon_image` wins when both are set — it is the more
+	 * deliberate choice, since an admin who uploads a file has replaced
+	 * the shape rather than added to it. Raw SVG becomes a data URI so
+	 * the same <img> draws it without the renderer learning to inject
+	 * markup, which is also the safer half: an <img> cannot execute
+	 * script the way an inlined <svg> can.
+	 *
+	 * The emoji is deliberately NOT folded in here. It is text, it
+	 * inherits the chip's font, and rasterising it would make it worse.
+	 *
+	 * @param array $link
+	 * @return string '' when the link has no image icon at all.
+	 */
+	protected function resolve_link_icon( array $link ) {
+		$image = isset( $link['icon_image'] ) ? trim( (string) $link['icon_image'] ) : '';
+		if ( '' !== $image ) {
+			return $image;
+		}
+
+		$svg = isset( $link['shape_svg'] ) ? trim( (string) $link['shape_svg'] ) : '';
+		if ( '' === $svg || false === stripos( $svg, '<svg' ) ) {
+			return '';
+		}
+
+		return 'data:image/svg+xml;utf8,' . rawurlencode( $svg );
+	}
+
 	protected function add_moderation_banner_text( array $meta, $noun ) {
 		$auto  = isset( $meta['auto_flagged'] ) ? (string) $meta['auto_flagged'] : '';
 		$count = isset( $meta['reports_count'] ) ? (int) $meta['reports_count'] : 0;
