@@ -127,6 +127,29 @@ class PreviewProxyController {
 			}
 		}
 
+		// The profile header's second line. FluentCommunity's portal draws
+		// "@username · N points" there and the endpoint carries no such
+		// field — only the parts. Joined here rather than in two children
+		// sharing a grid cell, which is the mistake D69 unpicked on the
+		// post card's byline.
+		if ( 'fc-member-profile' === $ds_slug && is_array( $payload ) ) {
+			foreach ( $payload as $i => $item ) {
+				if ( ! is_array( $item ) ) {
+					continue;
+				}
+				$bits = array();
+				if ( ! empty( $item['username'] ) ) {
+					$bits[] = '@' . $item['username'];
+				}
+				$points = isset( $item['total_points'] ) ? (int) $item['total_points'] : 0;
+				if ( $points > 0 ) {
+					/* translators: %d: the member's points total */
+					$bits[] = sprintf( _n( '%d point', '%d points', $points, 'appza-core' ), $points );
+				}
+				$payload[ $i ]['profile_byline'] = implode( ' · ', $bits );
+			}
+		}
+
 		// Feed links carry their icon in one of THREE fields — an emoji,
 		// an uploaded image URL, or raw inline SVG markup — and a chip
 		// can bind one image source, not three. Resolve them to a single
