@@ -21,6 +21,7 @@ use AppzaCore\Plugin\Rest\FluentCommunityFeedEnricher;
 use AppzaCore\Plugin\Rest\PreviewCacheInvalidator;
 use AppzaCore\Plugin\Rest\FluentCommunityMediaCap;
 use AppzaCore\Plugin\Rest\FluentCommunityMediaGalleryEnricher;
+use AppzaCore\Plugin\Rest\FluentCommunityModerationReportsEnricher;
 use AppzaCore\Plugin\Rest\FluentCommunitySpaceConfigEnricher;
 use AppzaCore\Plugin\Rest\FluentCommunityComposerEnricher;
 use AppzaCore\Plugin\Rest\RestRoutes;
@@ -131,6 +132,11 @@ class Appza_Core_Plugin {
 		// whether a given space takes attachments. fcom-mobile's lean
 		// transform computes and then drops all three. See class docblock.
 		$fcComposer = new FluentCommunityComposerEnricher();
+		// Gives each moderation report row the three strings the review
+		// modal draws (design 30) — the headline, the reason's label and
+		// a relative time — so the shells bind values rather than
+		// reproducing FluentCommunity's own branch in two places.
+		$fcModerationReports = new FluentCommunityModerationReportsEnricher();
 		$this->loader->add_action( 'rest_api_init', $rest, 'register_routes' );
 		$this->loader->add_action( 'rest_api_init', $auth, 'register_routes' );
 		$this->loader->add_action( 'rest_api_init', $fcFeedPerms, 'register_hooks' );
@@ -138,6 +144,7 @@ class Appza_Core_Plugin {
 		$this->loader->add_action( 'rest_api_init', $fcComposer, 'register_hooks' );
 		$this->loader->add_action( 'rest_api_init', $fcMediaGallery, 'register_hooks' );
 		$this->loader->add_action( 'rest_api_init', $fcFeed, 'register_hooks' );
+		$this->loader->add_action( 'rest_api_init', $fcModerationReports, 'register_hooks' );
 		$this->loader->add_action( 'rest_api_init', $previewCache, 'register_hooks' );
 		// Filter needs to be up whenever FC processes a feed write —
 		// which happens through rest_api_init for the mobile endpoint,

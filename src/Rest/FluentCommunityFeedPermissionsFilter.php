@@ -214,6 +214,21 @@ class FluentCommunityFeedPermissionsFilter {
 			// the viewer, so it is answered in the catalog's visible_when
 			// rather than folded in here.
 			'can_remove_preview'   => $canDelete,
+			// "Review" on the flagged banner (designs 28 and 34), and it
+			// is deliberately NOT `can_moderate`.
+			//
+			// fcom-mobile's /moderation/reports refuses anyone who is not
+			// a COMMUNITY moderator, and its own comment says why: Fluent
+			// Community Pro's endpoint paginates the whole moderation
+			// table while its policy only checks the caller's role in
+			// whatever space_id the request carried, so a single-space
+			// moderator would otherwise receive every report on the site.
+			//
+			// A space-scoped moderator therefore sees the flagged post
+			// (Feed::scopeByContentModerationAccessStatus lets them) but
+			// cannot read its reports. Gating the button on can_moderate
+			// would hand them one that opens an empty modal.
+			'can_review_reports'   => $this->can_review_reports( $currentUser ),
 		];
 
 		// Each inline COMMENT gets its own bag. Noor's item 24 gives the
@@ -257,11 +272,12 @@ class FluentCommunityFeedPermissionsFilter {
 			// to Copy link on its own — the same rule the post menu
 			// follows for a guest (design 22's logout case).
 			return [
-				'is_author'  => false,
-				'can_edit'   => false,
-				'can_delete' => false,
-				'can_pin'    => false,
-				'can_report' => false,
+				'is_author'          => false,
+				'can_edit'           => false,
+				'can_delete'         => false,
+				'can_pin'            => false,
+				'can_report'         => false,
+				'can_review_reports' => false,
 			];
 		}
 
@@ -280,7 +296,32 @@ class FluentCommunityFeedPermissionsFilter {
 			'can_delete' => $mayDelete,
 			'can_pin'    => (bool) $canModerate,
 			'can_report' => ! $isAuthor,
+			// Design 34's Review button, on the same terms as the post's.
+			// A comment's reports are read from the same endpoint with
+			// parent_id instead of post_id, so the same access rule holds.
+			'can_review_reports' => $this->can_review_reports( $user ),
 		];
+	}
+
+	/**
+	 * May this viewer READ moderation reports?
+	 *
+	 * `hasCommunityModeratorAccess()` is FluentCommunity's own community-
+	 * wide check, and it is the exact predicate fcom-mobile's
+	 * /moderation/reports gates on — so the app offers Review precisely
+	 * when the endpoint behind it will answer.
+	 *
+	 * Community-wide, not space-scoped: see the note on the bag above.
+	 * Fails closed for a signed-out viewer and for a site without the
+	 * method, because a Review button that 403s is worse than none.
+	 *
+	 * @param \FluentCommunity\App\Models\User|null $user
+	 */
+	protected function can_review_reports( $user ) {
+		if ( ! $user || ! method_exists( $user, 'hasCommunityModeratorAccess' ) ) {
+			return false;
+		}
+		return (bool) $user->hasCommunityModeratorAccess();
 	}
 
 	/**

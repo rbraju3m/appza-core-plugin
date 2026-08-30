@@ -525,6 +525,19 @@ class PreviewProxyController {
 					isset( $my_votes_by_feed[ (int) $item['id'] ] ) ? $my_votes_by_feed[ (int) $item['id'] ] : array()
 				);
 			}
+			// The flagged banner's sentence (designs 28 and 34), derived
+			// here for the same reason the byline was: it is THREE
+			// sentences, with a noun that is "post" or "comment" and an
+			// English plural, and no clause grammar can pick between
+			// them. Three children with three gates would be three ways
+			// to say one thing.
+			// Only when there IS a meta object. A post with `meta: null`
+			// cannot be flagged — the flag lives in that very object — so
+			// turning null into [] here would change the payload's shape
+			// for every unflagged row to say nothing new.
+			if ( isset( $items[ $i ]['meta'] ) && is_array( $items[ $i ]['meta'] ) ) {
+				$items[ $i ]['meta'] = $this->add_moderation_banner_text( $items[ $i ]['meta'], 'post' );
+			}
 			// The inline comments the card draws under the action strip
 			// (designs 19, 26). Two jobs FluentCommunity does not do for
 			// us: a PINNED comment has to come first, and each row needs
@@ -712,6 +725,58 @@ class PreviewProxyController {
 		return $out;
 	}
 
+	/**
+	 * The sentence the flagged banner draws (designs 28 and 34).
+	 *
+	 * FluentCommunity's own `ReportReview` component picks between three,
+	 * and this reproduces its branches exactly rather than approximating
+	 * them, so the app and the portal accuse a post of the same thing:
+	 *
+	 *   auto_flagged == 'yes'   "This <noun> has been flagged
+	 *                            automatically by the site rule."
+	 *   reports_count > 1       "This <noun> has been flagged with N reports"
+	 *   otherwise               "…with N report"
+	 *
+	 * Returns the meta unchanged when the content is not flagged at all —
+	 * an absent key is what the banner's `exists` gate reads, so writing
+	 * an empty string here would draw an empty cream box on every card.
+	 *
+	 * @param array  $meta
+	 * @param string $noun 'post' | 'comment'
+	 * @return array
+	 */
+	protected function add_moderation_banner_text( array $meta, $noun ) {
+		$auto  = isset( $meta['auto_flagged'] ) ? (string) $meta['auto_flagged'] : '';
+		$count = isset( $meta['reports_count'] ) ? (int) $meta['reports_count'] : 0;
+
+		if ( 'yes' !== $auto && $count < 1 ) {
+			return $meta;
+		}
+
+		if ( 'yes' === $auto ) {
+			$meta['moderation_banner_text'] = sprintf(
+				/* translators: %s: post or comment */
+				__( 'This %s has been flagged automatically by the site rule', 'appza-core' ),
+				$noun
+			);
+			return $meta;
+		}
+
+		$meta['moderation_banner_text'] = sprintf(
+			/* translators: 1: post or comment, 2: number of reports */
+			_n(
+				'This %1$s has been flagged with %2$d report',
+				'This %1$s has been flagged with %2$d reports',
+				$count,
+				'appza-core'
+			),
+			$noun,
+			$count
+		);
+
+		return $meta;
+	}
+
 	protected function build_images_from_meta( $meta ) {
 		if ( ! is_array( $meta ) ) {
 			return array();
@@ -842,6 +907,12 @@ class PreviewProxyController {
 			}
 			if ( isset( $comment['message_rendered'] ) && is_string( $comment['message_rendered'] ) ) {
 				$comments[ $i ]['message_rendered'] = $this->sanitize_rich_text( $comment['message_rendered'] );
+			}
+			// Design 34's banner, with "comment" as the noun. Same guard as
+			// the post's above: an unflagged comment's `meta` is null and
+			// stays null.
+			if ( isset( $comment['meta'] ) && is_array( $comment['meta'] ) ) {
+				$comments[ $i ]['meta'] = $this->add_moderation_banner_text( $comment['meta'], 'comment' );
 			}
 			// "Copy link" on a comment (design 24). FluentCommunity gives
 			// a comment no permalink of its own — the portal links to the
