@@ -586,8 +586,12 @@ class PreviewProxyController {
 			}
 			// Banner CTA buttons: derive Ionic fill/color from the API's
 			// `type` string so the renderer can bind them directly without
-			// hardcoding per-slot styling. type=primary → filled primary;
-			// type=secondary → outlined primary; type=link → clear/text.
+			// hardcoding per-slot styling. FluentCommunity offers exactly
+			// four types — primary → filled primary; secondary → outlined
+			// primary; text → filled light (the soft grey one); link →
+			// clear. `allowClose` is NOT touched here: it rides through
+			// untransformed, so a course banner could gate its close × on
+			// it later. The feed banner's own customizer never sets it.
 			if ( isset( $item['ctaButtons'] ) && is_array( $item['ctaButtons'] ) ) {
 				$items[ $i ]['ctaButtons'] = $this->normalize_cta_buttons( $item['ctaButtons'] );
 			}
@@ -679,14 +683,23 @@ class PreviewProxyController {
 					$btn['fill']  = 'outline';
 					$btn['color'] = 'primary';
 					break;
+				case 'text':
+					// The soft grey button — design 15's DOWNLOAD FREE. This is
+					// the fourth type FluentCommunity actually offers (admin_app.js
+					// Button Type dropdown: Primary / Secondary / Text / Link);
+					// `muted` and `ghost` used to sit here and are written by
+					// nothing, so a real `text` button was falling through to the
+					// primary default and drawing filled blue.
+					//
+					// Ionic's `light` is a pale ground with a DARK contrast text
+					// colour, which is the pair FC's `el-button is-text` draws.
+					// `medium` would give white-on-grey.
+					$btn['fill']  = 'solid';
+					$btn['color'] = 'light';
+					break;
 				case 'link':
 					$btn['fill']  = 'clear';
 					$btn['color'] = 'primary';
-					break;
-				case 'muted':
-				case 'ghost':
-					$btn['fill']  = 'solid';
-					$btn['color'] = 'medium';
 					break;
 				case 'primary':
 				default:
@@ -1052,14 +1065,20 @@ class PreviewProxyController {
 			array(
 				'enabled'              => 'yes',
 				'title'                => 'Build Mobile Apps With Zero Coding',
-				'description_rendered' => '<p>Bring your website to the mobile world without a single line of code, be it blog, e-commerce, LMS or anything else. Custom components give you full control over the look and feel.</p>',
+				// Long enough to overflow the collapsed clamp, so the demo
+				// exercises View More / View Less rather than only the
+				// >2-buttons half of the verdict.
+				'description_rendered' => '<p>Bring your website to the mobile world without a single line of code, be it blog, e-commerce, LMS or anything else! It uses custom components to make your app and also provides access to component properties to have better control, allowing you to make the app exactly how you want it to be.</p>',
 				'mediaType'            => 'image',
 				'bannerImage'          => 'https://picsum.photos/seed/appza-banner/800/450',
 				'bannerVideo'          => null,
+				'allowClose'           => 'yes',
+				// One of each type, in the order FluentCommunity's Button
+				// Type dropdown lists them — design 15 draws all four.
 				'ctaButtons'           => array(
 					array( 'label' => 'Try Demo',      'link' => 'https://appza.io/demo',     'type' => 'primary',   'newTab' => 'yes' ),
 					array( 'label' => 'Buy Now',       'link' => 'https://appza.io/buy',      'type' => 'secondary', 'newTab' => 'yes' ),
-					array( 'label' => 'Download Free', 'link' => 'https://appza.io/download', 'type' => 'primary',   'newTab' => 'yes' ),
+					array( 'label' => 'Download Free', 'link' => 'https://appza.io/download', 'type' => 'text',      'newTab' => 'yes' ),
 					array( 'label' => 'Pricing',       'link' => 'https://appza.io/pricing',  'type' => 'link',      'newTab' => 'yes' ),
 				),
 			),
