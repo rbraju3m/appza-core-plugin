@@ -212,6 +212,83 @@ class PreviewProxyController {
 				// The renderer expands a strip from `tabs` on the AppZet or, as
 				// here, off the bound ROW. One profile row means one strip.
 				$payload[ $i ]['tabs'] = $this->profile_tabs( $item );
+
+				// The About tab. FluentCommunity's portal is the reference —
+				// Noor has no design for it — and everything it shows is
+				// already on this row. Composed here for the same reason the
+				// byline is: a text child binds ONE string, and three children
+				// sharing a line is the mistake D69 unpicked.
+				//
+				// `created_at` has already been rewritten to a compact relative
+				// form by normalize_items ("8mo"); last_activity has not.
+				$bits = array();
+				if ( ! empty( $item['created_at'] ) ) {
+					/* translators: %s: a relative time, e.g. "8mo" */
+					$bits[] = sprintf( __( 'Joined %s ago', 'appza-core' ), $item['created_at'] );
+				}
+				if ( ! empty( $item['last_activity'] ) && is_string( $item['last_activity'] ) ) {
+					/* translators: %s: a relative time, e.g. "4d" */
+					$bits[] = sprintf( __( 'Active %s ago', 'appza-core' ), $this->relative_time( $item['last_activity'] ) );
+				}
+				$points = isset( $item['total_points'] ) ? (int) $item['total_points'] : 0;
+				if ( $points > 0 ) {
+					/* translators: %d: the member's points total */
+					$bits[] = sprintf( _n( '%d point', '%d points', $points, 'appza-core' ), $points );
+				}
+				$payload[ $i ]['about_stats'] = implode( ' · ', $bits );
+
+				// Social links arrive as an OBJECT keyed by provider, and a
+				// variadic strip expands an ARRAY. Empty on this box, so the
+				// strip simply draws nothing.
+				$socials = array();
+				$raw_socials = isset( $item['social_links'] ) ? (array) $item['social_links'] : array();
+				foreach ( $raw_socials as $provider => $url ) {
+					if ( ! is_string( $url ) || '' === trim( $url ) ) {
+						continue;
+					}
+					$socials[] = array(
+						'value'     => (string) $provider,
+						'label'     => ucfirst( str_replace( array( '_', '-' ), ' ', (string) $provider ) ),
+						'permalink' => trim( $url ),
+					);
+				}
+				$payload[ $i ]['social_link_list'] = $socials;
+			}
+		}
+
+		// The profile's COMMENTS tab. Two derivations, both so a row can
+		// be a card:
+		//
+		// `comment_context` — the line under the comment saying which post
+		// it was left on. FluentCommunity does not require a post title
+		// and most posts here have none, so it falls back to the post's
+		// own text, trimmed.
+		//
+		// `slug` — the POST's slug, promoted to the top level. post-detail
+		// resolves its row from `route.post_slug`, which reads the item the
+		// tap passes as context; a comment has no slug of its own, so
+		// without this the tap would arrive at post-detail with nothing to
+		// look up.
+		if ( 'fc-member-comments' === $ds_slug && is_array( $payload ) ) {
+			foreach ( $payload as $i => $item ) {
+				if ( ! is_array( $item ) ) {
+					continue;
+				}
+				$post  = isset( $item['post'] ) && is_array( $item['post'] ) ? $item['post'] : array();
+				$title = isset( $post['title'] ) ? trim( wp_strip_all_tags( (string) $post['title'] ) ) : '';
+				if ( '' === $title ) {
+					$body  = (string) ( $post['message_rendered'] ?? $post['message'] ?? '' );
+					$title = trim( wp_trim_words( wp_strip_all_tags( $body ), 8, '…' ) );
+				}
+				if ( '' === $title ) {
+					$title = __( 'a post', 'appza-core' );
+				}
+				/* translators: %s: the title of the post a comment was left on */
+				$payload[ $i ]['comment_context'] = sprintf( __( 'on %s', 'appza-core' ), $title );
+
+				if ( ! empty( $post['slug'] ) ) {
+					$payload[ $i ]['slug'] = (string) $post['slug'];
+				}
 			}
 		}
 

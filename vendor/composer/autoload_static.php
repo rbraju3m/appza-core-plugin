@@ -48,6 +48,7 @@ class ComposerStaticInitfde03eb503df2cd08e2e0632dc5d8333
         'AppzaCore\\Plugin\\Rest\\FluentCommunityMediaCap' => __DIR__ . '/../..' . '/src/Rest/FluentCommunityMediaCap.php',
         'AppzaCore\\Plugin\\Rest\\FluentCommunityMediaGalleryEnricher' => __DIR__ . '/../..' . '/src/Rest/FluentCommunityMediaGalleryEnricher.php',
         'AppzaCore\\Plugin\\Rest\\FluentCommunityMemberUpdateCompleter' => __DIR__ . '/../..' . '/src/Rest/FluentCommunityMemberUpdateCompleter.php',
+        'AppzaCore\\Plugin\\Rest\\FluentCommunityMemberUsernameShim' => __DIR__ . '/../..' . '/src/Rest/FluentCommunityMemberUsernameShim.php',
         'AppzaCore\\Plugin\\Rest\\FluentCommunityModerationReportsEnricher' => __DIR__ . '/../..' . '/src/Rest/FluentCommunityModerationReportsEnricher.php',
         'AppzaCore\\Plugin\\Rest\\FluentCommunitySpaceConfigEnricher' => __DIR__ . '/../..' . '/src/Rest/FluentCommunitySpaceConfigEnricher.php',
         'AppzaCore\\Plugin\\Rest\\FluentCommunityUsersSearchController' => __DIR__ . '/../..' . '/src/Rest/FluentCommunityUsersSearchController.php',

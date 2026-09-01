@@ -33,6 +33,7 @@ return array(
     'AppzaCore\\Plugin\\Rest\\FluentCommunityMediaCap' => $baseDir . '/src/Rest/FluentCommunityMediaCap.php',
     'AppzaCore\\Plugin\\Rest\\FluentCommunityMediaGalleryEnricher' => $baseDir . '/src/Rest/FluentCommunityMediaGalleryEnricher.php',
     'AppzaCore\\Plugin\\Rest\\FluentCommunityMemberUpdateCompleter' => $baseDir . '/src/Rest/FluentCommunityMemberUpdateCompleter.php',
+    'AppzaCore\\Plugin\\Rest\\FluentCommunityMemberUsernameShim' => $baseDir . '/src/Rest/FluentCommunityMemberUsernameShim.php',
     'AppzaCore\\Plugin\\Rest\\FluentCommunityModerationReportsEnricher' => $baseDir . '/src/Rest/FluentCommunityModerationReportsEnricher.php',
     'AppzaCore\\Plugin\\Rest\\FluentCommunitySpaceConfigEnricher' => $baseDir . '/src/Rest/FluentCommunitySpaceConfigEnricher.php',
     'AppzaCore\\Plugin\\Rest\\FluentCommunityUsersSearchController' => $baseDir . '/src/Rest/FluentCommunityUsersSearchController.php',

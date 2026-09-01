@@ -22,6 +22,7 @@ use AppzaCore\Plugin\Rest\PreviewCacheInvalidator;
 use AppzaCore\Plugin\Rest\FluentCommunityMediaCap;
 use AppzaCore\Plugin\Rest\FluentCommunityMediaGalleryEnricher;
 use AppzaCore\Plugin\Rest\FluentCommunityMemberUpdateCompleter;
+use AppzaCore\Plugin\Rest\FluentCommunityMemberUsernameShim;
 use AppzaCore\Plugin\Rest\FluentCommunityModerationReportsEnricher;
 use AppzaCore\Plugin\Rest\FluentCommunitySpaceConfigEnricher;
 use AppzaCore\Plugin\Rest\FluentCommunityComposerEnricher;
@@ -144,6 +145,10 @@ class Appza_Core_Plugin {
 		// meta from the request and an omitted field is ERASED rather than
 		// left alone. See the class docblock for the exact code paths.
 		$fcMemberUpdate = new FluentCommunityMemberUpdateCompleter();
+		// /members/spaces declares `username` REQUIRED while every other
+		// member route takes `member_id`. Translated before dispatch so the
+		// profile's five tabs stay addressed by one number.
+		$fcMemberUsername = new FluentCommunityMemberUsernameShim();
 		$this->loader->add_action( 'rest_api_init', $rest, 'register_routes' );
 		$this->loader->add_action( 'rest_api_init', $auth, 'register_routes' );
 		$this->loader->add_action( 'rest_api_init', $fcFeedPerms, 'register_hooks' );
@@ -153,6 +158,7 @@ class Appza_Core_Plugin {
 		$this->loader->add_action( 'rest_api_init', $fcFeed, 'register_hooks' );
 		$this->loader->add_action( 'rest_api_init', $fcModerationReports, 'register_hooks' );
 		$this->loader->add_action( 'rest_api_init', $fcMemberUpdate, 'register_hooks' );
+		$this->loader->add_action( 'rest_api_init', $fcMemberUsername, 'register_hooks' );
 		$this->loader->add_action( 'rest_api_init', $previewCache, 'register_hooks' );
 		// Filter needs to be up whenever FC processes a feed write —
 		// which happens through rest_api_init for the mobile endpoint,
