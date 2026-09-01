@@ -147,6 +147,41 @@ class PreviewProxyController {
 					$bits[] = sprintf( _n( '%d point', '%d points', $points, 'appza-core' ), $points );
 				}
 				$payload[ $i ]['profile_byline'] = implode( ' · ', $bits );
+
+				// The follow cluster's gates, and the two header counts.
+				//
+				// FluentCommunity Pro appends `follow` — the LEVEL — only when
+				// a row exists for this viewer -> this profile, and unfollow
+				// DELETES that row. So an absent key is the "not following"
+				// state, not a missing field; reading it as 0 would say
+				// "blocked", which is a different thing entirely.
+				//
+				//   0 = blocked · 1 = following · 2 = following + notify
+				//
+				// Derived here rather than in the catalog because a field
+				// mapping can only bind a PATH, and "absent, not zero" is not
+				// a path. Both viewer-relative keys are also absent on your
+				// own profile by design — FC skips them when viewer == target.
+				$profile_user_id = isset( $item['user_id'] ) ? (int) $item['user_id'] : 0;
+				$follow_level    = ( array_key_exists( 'follow', $item ) && is_numeric( $item['follow'] ) )
+					? (int) $item['follow']
+					: null;
+
+				$payload[ $i ]['is_self_profile'] = ( $viewer_id > 0 && $profile_user_id === $viewer_id );
+				$payload[ $i ]['follow_level']    = $follow_level;
+				$payload[ $i ]['is_following']    = ( null !== $follow_level && $follow_level >= 1 );
+				$payload[ $i ]['is_notifying']    = ( 2 === $follow_level );
+				// FC's follow() rejects a blocked user outright ("already
+				// following or blocked"), so a Follow button drawn on one is a
+				// button that can only fail. The cluster gates on this.
+				$payload[ $i ]['is_blocked_by_viewer'] = ( 0 === $follow_level );
+
+				// Both counts are WITHHELD rather than zeroed — by the privacy
+				// setting (who_can_see_followers / _followings) and by the
+				// module being off. Default to 0 so the two header buttons
+				// always bind a number instead of an undefined.
+				$payload[ $i ]['followers_count']  = isset( $item['followers_count'] ) ? (int) $item['followers_count'] : 0;
+				$payload[ $i ]['followings_count'] = isset( $item['followings_count'] ) ? (int) $item['followings_count'] : 0;
 			}
 		}
 
