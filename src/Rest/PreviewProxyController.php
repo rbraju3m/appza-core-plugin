@@ -193,6 +193,14 @@ class PreviewProxyController {
 				$payload[ $i ]['followers_count_label'] = sprintf( _n( '%d Follower', '%d Followers', $followers, 'appza-core' ), $followers );
 				/* translators: %d: number of people this member follows */
 				$payload[ $i ]['followings_count_label'] = sprintf( _n( '%d Following', '%d Followings', $followings, 'appza-core' ), $followings );
+
+				// The edit form's email field. FluentCommunity changes an
+				// address inline for `edit_users`, or for the profile's owner on
+				// a site whose can_change_email privacy setting is yes — and
+				// fcom-mobile exposes no email route at all. It publishes the
+				// verdict as `can_change_email`; inverted here because a field
+				// binds `readonly`, and a binding cannot negate.
+				$payload[ $i ]['email_readonly'] = empty( $item['can_change_email'] );
 			}
 		}
 
