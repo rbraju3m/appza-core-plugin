@@ -201,6 +201,17 @@ class PreviewProxyController {
 				// verdict as `can_change_email`; inverted here because a field
 				// binds `readonly`, and a binding cannot negate.
 				$payload[ $i ]['email_readonly'] = empty( $item['can_change_email'] );
+
+				// The profile's tab strip, which is FluentCommunity's OWN nav
+				// rather than our copy of it. `profile_navs` is already
+				// filtered per viewer — Spaces and Courses appear only with
+				// canViewUserSpaces, and Courses additionally needs the course
+				// module — so a hand-kept list here would be a second copy of
+				// a rule FluentCommunity changes at will.
+				//
+				// The renderer expands a strip from `tabs` on the AppZet or, as
+				// here, off the bound ROW. One profile row means one strip.
+				$payload[ $i ]['tabs'] = $this->profile_tabs( $item );
 			}
 		}
 
@@ -322,6 +333,45 @@ class PreviewProxyController {
 	 * bookmark state never surfaces there — we query the reactions table
 	 * directly in normalize_items() using the id resolved here.
 	 */
+	/**
+	 * FluentCommunity's profile navs, as the tab strip's entries.
+	 *
+	 * Their slugs are the portal's route names; ours are the values the
+	 * placements gate on. Anything unrecognised is passed through with its
+	 * slug as the value, so a nav FC adds later draws as a tab rather than
+	 * vanishing — it will simply have no placement answering it yet.
+	 *
+	 * @param array $item One profile row.
+	 * @return array<int,array<string,string>>
+	 */
+	protected function profile_tabs( $item ) {
+		$map = array(
+			'user_profile'       => 'about',
+			'user_profile_feeds' => 'posts',
+			'user_spaces'        => 'spaces',
+			'user_courses'       => 'courses',
+			'user_comments'      => 'comments',
+		);
+
+		$navs = isset( $item['profile_navs'] ) && is_array( $item['profile_navs'] )
+			? $item['profile_navs']
+			: array();
+
+		$tabs = array();
+		foreach ( $navs as $nav ) {
+			if ( ! is_array( $nav ) || empty( $nav['slug'] ) ) {
+				continue;
+			}
+			$slug = (string) $nav['slug'];
+			$tabs[] = array(
+				'value' => $map[ $slug ] ?? $slug,
+				'label' => isset( $nav['title'] ) ? (string) $nav['title'] : ucfirst( $map[ $slug ] ?? $slug ),
+			);
+		}
+
+		return $tabs;
+	}
+
 	protected function resolve_viewer_id( $auth_header ) {
 		if ( ! is_string( $auth_header ) || 0 !== stripos( $auth_header, 'basic ' ) ) {
 			return 0;
