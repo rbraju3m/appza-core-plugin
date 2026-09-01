@@ -44,6 +44,20 @@ class FluentCommunityFeedPermissionsFilter {
 		'/fcom-mobile/api/v1/feeds/bookmarks',
 	];
 
+	/**
+	 * The standalone comment list under post detail. Handled on its own
+	 * branch below, because these items are COMMENTS, not feeds: they
+	 * carry no space_id of their own (the post's space is what scopes
+	 * every comment capability), and the feed bag's rows — pin to
+	 * sidebar, disable comments, remove preview — mean nothing here.
+	 *
+	 * Without this the whole comment menu was ungated: designs 22, 24 and
+	 * 25 are three different menus for three viewers, and with no
+	 * `permissions` on the row every clause read false and every viewer
+	 * got the same one.
+	 */
+	const COMMENT_LIST_ROUTE = '/fcom-mobile/api/v1/feeds/comments';
+
 	public function register_hooks() {
 		// rest_request_after_callbacks fires inside WP_REST_Server::dispatch()
 		// after the route callback returns — so we catch both the outer
@@ -63,7 +77,8 @@ class FluentCommunityFeedPermissionsFilter {
 			return $response;
 		}
 		$route = (string) $request->get_route();
-		if ( ! in_array( $route, self::ENRICHABLE_ROUTES, true ) ) {
+		$isCommentList = ( self::COMMENT_LIST_ROUTE === $route );
+		if ( ! $isCommentList && ! in_array( $route, self::ENRICHABLE_ROUTES, true ) ) {
 			return $response;
 		}
 		// FluentCommunity must be active — otherwise the Space/User classes
@@ -103,6 +118,13 @@ class FluentCommunityFeedPermissionsFilter {
 		$currentUser = null;
 		$currentUserResolved = false;
 		$spaceCache = [];
+
+		if ( $isCommentList ) {
+			$data['items'] = $this->attach_comment_list_permissions( $items );
+			$response->set_data( $data );
+
+			return $response;
+		}
 
 		// items may be an array of rows (list) OR a single row (create/patch/update).
 		if ( is_array( $items ) && $this->looks_like_row_list( $items ) ) {
@@ -257,6 +279,62 @@ class FluentCommunityFeedPermissionsFilter {
 		}
 
 		return $feed;
+	}
+
+	/**
+	 * The standalone comment list — the same per-comment bag the inline
+	 * strip already gets, computed once for the whole thread.
+	 *
+	 * ONE space lookup, not one per comment: every row in this response
+	 * belongs to the same post, so the post's space is a constant. Reading
+	 * it per row would issue a query per comment on a busy thread for an
+	 * answer that cannot change between them.
+	 *
+	 * @param  array $items
+	 * @return array
+	 */
+	protected function attach_comment_list_permissions( $items ) {
+		if ( ! is_array( $items ) ) {
+			return $items;
+		}
+
+		$user = \FluentCommunity\App\Services\Helper::getCurrentUser() ?: null;
+
+		// A guest gets a bag of falses rather than no bag at all. An absent
+		// `permissions` key and one full of falses read the same to the
+		// clause grammar, but only the second says so on purpose — and
+		// designs 19 and 20 are exactly that state: Copy link, nothing else.
+		$space       = null;
+		$canModerate = false;
+
+		if ( $user ) {
+			$postId = 0;
+			foreach ( $items as $row ) {
+				if ( is_array( $row ) && ! empty( $row['post_id'] ) ) {
+					$postId = (int) $row['post_id'];
+					break;
+				}
+			}
+			if ( $postId > 0 && class_exists( '\FluentCommunity\App\Models\Feed' ) ) {
+				$feed = \FluentCommunity\App\Models\Feed::withoutGlobalScopes()->find( $postId );
+				if ( $feed && ! empty( $feed->space_id ) ) {
+					$space = \FluentCommunity\App\Models\Space::find( (int) $feed->space_id ) ?: null;
+				}
+			}
+			if ( $space ) {
+				$canModerate = $user->hasPermissionOrInCurrentSpace( 'community_moderator', $space )
+					|| $user->hasPermissionOrInCurrentSpace( 'community_admin', $space );
+			}
+		}
+
+		foreach ( $items as $i => $row ) {
+			if ( ! is_array( $row ) ) {
+				continue;
+			}
+			$items[ $i ]['permissions'] = $this->comment_permissions( $row, $user, $space, $canModerate );
+		}
+
+		return $items;
 	}
 
 	/**

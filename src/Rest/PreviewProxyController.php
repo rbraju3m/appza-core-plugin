@@ -292,6 +292,39 @@ class PreviewProxyController {
 			}
 		}
 
+		// The comment thread under post detail (the 28 FeedPostDetails
+		// designs). Four derivations, all of them shape rather than style:
+		//
+		// `children` — FluentCommunity answers /feeds/{id}/comments with a
+		// FLAT list carrying `parent_id`, and nothing threads it. The real
+		// data nests arbitrarily deep (a reply to a reply to a reply), but
+		// FC's own portal and Noor's designs 13 and 21 both draw exactly
+		// TWO levels, so every descendant is flattened onto its top-level
+		// ancestor rather than indented one step further per generation.
+		// An indent staircase is what a depth-faithful tree would give,
+		// and no design has one.
+		//
+		// `reply_to_name` — the blue name in front of a reply's body. It
+		// is the author of the comment being replied to, NOT of the thread
+		// root, which is the difference that makes a flattened list still
+		// readable. FluentCommunity stores it nowhere: a reply's
+		// message_rendered is the bare body, so without this the reply
+		// reads as a non-sequitur.
+		//
+		// `reply_count_label` — "1 Reply" / "2 Reply". Not pluralised, on
+		// purpose: designs 13 and 21 both write "Reply" singular and the
+		// designs win.
+		//
+		// `sort_*` — the sort sheet has four orders and FluentCommunity's
+		// endpoint accepts none of them (getComments is hardcoded to
+		// created_at ASC), so the ordering happens client-side and these
+		// are the keys it orders on. `sort_time` is the epoch of the
+		// ORIGINAL created_at, which the relative-time pass above would
+		// otherwise have destroyed.
+		if ( 'fc-post-comments' === $ds_slug && is_array( $payload ) ) {
+			$payload = $this->thread_comments( $payload );
+		}
+
 		// Feed links carry their icon in one of THREE fields — an emoji,
 		// an uploaded image URL, or raw inline SVG markup — and a chip
 		// can bind one image source, not three. Resolve them to a single
@@ -714,7 +747,14 @@ class PreviewProxyController {
 				$items[ $i ]['message_rendered'] = $this->sanitize_rich_text( $item['message_rendered'] );
 			}
 			if ( isset( $item['created_at'] ) && is_string( $item['created_at'] ) && '' !== $item['created_at'] ) {
-				$items[ $i ]['created_at'] = $this->relative_time( $item['created_at'] );
+				// Keep the machine-readable instant alongside the human one.
+				// `created_at` becomes "24m" here, and anything downstream
+				// that needs to ORDER by time — the comment sort sheet, for
+				// one — cannot get it back: strtotime('24m') is false, and
+				// "1mo" sorts before "5m" alphabetically. Stamped before the
+				// rewrite, once, for every row the proxy touches.
+				$items[ $i ]['created_at_ts'] = (int) strtotime( $item['created_at'] );
+				$items[ $i ]['created_at']    = $this->relative_time( $item['created_at'] );
 			}
 			// The author byline as ONE string — "4h · Appza Community".
 			//
@@ -1157,6 +1197,14 @@ class PreviewProxyController {
 				continue;
 			}
 			if ( isset( $comment['created_at'] ) && is_string( $comment['created_at'] ) && '' !== $comment['created_at'] ) {
+				// Same reason as normalize_items(): stamp the epoch before
+				// the string stops being one. Guarded so a second pass over
+				// an already-relative value cannot overwrite a good stamp
+				// with 0 — thread_comments runs this over the parents after
+				// the generic pass has already run over them once.
+				if ( empty( $comments[ $i ]['created_at_ts'] ) ) {
+					$comments[ $i ]['created_at_ts'] = (int) strtotime( $comment['created_at'] );
+				}
 				$comments[ $i ]['created_at'] = $this->relative_time( $comment['created_at'] );
 			}
 			if ( isset( $comment['message_rendered'] ) && is_string( $comment['message_rendered'] ) ) {
@@ -1190,6 +1238,133 @@ class PreviewProxyController {
 		);
 
 		return $comments;
+	}
+
+	/**
+	 * The standalone comment thread: flat rows in, two-level tree out.
+	 *
+	 * @param array $rows
+	 * @return array
+	 */
+	protected function thread_comments( array $rows ) {
+		$byId    = array();
+		$permalink = '';
+
+		foreach ( $rows as $row ) {
+			if ( is_array( $row ) && isset( $row['id'] ) ) {
+				$byId[ (int) $row['id'] ] = $row;
+			}
+		}
+
+		// One permalink for the whole thread — every row belongs to the
+		// same post, so resolving it per comment would be the same lookup
+		// repeated for an answer that cannot differ.
+		$firstPostId = 0;
+		foreach ( $rows as $row ) {
+			if ( is_array( $row ) && ! empty( $row['post_id'] ) ) {
+				$firstPostId = (int) $row['post_id'];
+				break;
+			}
+		}
+		if ( $firstPostId > 0 && class_exists( '\\FluentCommunity\\App\\Models\\Feed' ) ) {
+			$feed = \FluentCommunity\App\Models\Feed::withoutGlobalScopes()->find( $firstPostId );
+			if ( $feed && ! empty( $feed->permalink ) ) {
+				$permalink = (string) $feed->permalink;
+			}
+		}
+
+		// Resolve each row's TOP-LEVEL ancestor, and the display name of
+		// its immediate parent. The walk is bounded by the row count so a
+		// cyclic parent_id — which no writer should produce and a restored
+		// dump might — cannot spin here.
+		$rootOf   = array();
+		$resolve  = function ( $id ) use ( &$byId, &$rootOf ) {
+			$seen = array();
+			$cur  = (int) $id;
+			while ( isset( $byId[ $cur ] ) && ! empty( $byId[ $cur ]['parent_id'] ) ) {
+				if ( isset( $seen[ $cur ] ) ) {
+					break;
+				}
+				$seen[ $cur ] = true;
+				$cur = (int) $byId[ $cur ]['parent_id'];
+			}
+			return $cur;
+		};
+
+		$parents = array();
+		$replies = array();
+
+		foreach ( $rows as $row ) {
+			if ( ! is_array( $row ) || ! isset( $row['id'] ) ) {
+				continue;
+			}
+			$id = (int) $row['id'];
+
+			// The epoch normalize_items() stamped before it rewrote
+			// created_at into "24m". Falling back to strtotime covers the
+			// row that never went through that pass; it cannot be the only
+			// source, because by the time this runs created_at is a phrase.
+			$row['sort_time'] = isset( $row['created_at_ts'] )
+				? (int) $row['created_at_ts']
+				: ( is_string( $row['created_at'] ?? null ) ? (int) strtotime( $row['created_at'] ) : 0 );
+			$row['sort_likes'] = isset( $row['reactions_count'] ) ? (int) $row['reactions_count'] : 0;
+
+			if ( empty( $row['parent_id'] ) ) {
+				$parents[ $id ] = $row;
+				continue;
+			}
+
+			$parentId = (int) $row['parent_id'];
+			if ( isset( $byId[ $parentId ]['xprofile']['display_name'] ) ) {
+				$row['reply_to_name'] = (string) $byId[ $parentId ]['xprofile']['display_name'];
+			}
+			$rootId = $resolve( $id );
+			$rootOf[ $id ] = $rootId;
+			$replies[ $rootId ][] = $row;
+		}
+
+		// A reply whose ancestor is not in this response (a moderated-away
+		// parent, say) would otherwise vanish with it. Promote it to the
+		// top rather than dropping a comment somebody wrote.
+		foreach ( $replies as $rootId => $kids ) {
+			if ( isset( $parents[ $rootId ] ) ) {
+				continue;
+			}
+			foreach ( $kids as $kid ) {
+				$parents[ (int) $kid['id'] ] = $kid;
+			}
+			unset( $replies[ $rootId ] );
+		}
+
+		$out = array();
+		foreach ( $parents as $id => $parent ) {
+			$kids = isset( $replies[ $id ] ) ? $replies[ $id ] : array();
+			usort(
+				$kids,
+				static function ( $a, $b ) {
+					return ( $a['sort_time'] ?? 0 ) <=> ( $b['sort_time'] ?? 0 );
+				}
+			);
+			$kids = $this->normalize_comments( $kids, $permalink );
+
+			$parent['children']    = $kids;
+			$parent['reply_count'] = count( $kids );
+			if ( $parent['reply_count'] > 0 ) {
+				/* translators: %d: how many replies a comment has. Singular "Reply" is deliberate — the designs write it that way at every count. */
+				$parent['reply_count_label'] = sprintf( __( '%d Reply', 'appza-core' ), $parent['reply_count'] );
+			}
+			// The order the sheet's "Most replied" row sorts on. Present on
+			// every parent, including the ones with none, so the comparison
+			// never has to treat a missing key as a number.
+			$parent['sort_replies'] = $parent['reply_count'];
+			$out[] = $parent;
+		}
+
+		// Pinned first + relative times + sanitized bodies + comment
+		// permalinks, for the top level. The replies went through the same
+		// pass above; running it once over a nested array would have
+		// re-sorted the children into the parents.
+		return $this->normalize_comments( $out, $permalink );
 	}
 
 	/**
