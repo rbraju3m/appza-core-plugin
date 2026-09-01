@@ -180,8 +180,19 @@ class PreviewProxyController {
 				// setting (who_can_see_followers / _followings) and by the
 				// module being off. Default to 0 so the two header buttons
 				// always bind a number instead of an undefined.
-				$payload[ $i ]['followers_count']  = isset( $item['followers_count'] ) ? (int) $item['followers_count'] : 0;
-				$payload[ $i ]['followings_count'] = isset( $item['followings_count'] ) ? (int) $item['followings_count'] : 0;
+				$followers  = isset( $item['followers_count'] ) ? (int) $item['followers_count'] : 0;
+				$followings = isset( $item['followings_count'] ) ? (int) $item['followings_count'] : 0;
+				$payload[ $i ]['followers_count']  = $followers;
+				$payload[ $i ]['followings_count'] = $followings;
+
+				// A count button binds ONE text, and a bare "0" says nothing —
+				// the same reason the byline above is joined here rather than
+				// split across two children sharing a cell (D69). The words are
+				// FluentCommunity's own: it says Followers and Followings.
+				/* translators: %d: number of people following this member */
+				$payload[ $i ]['followers_count_label'] = sprintf( _n( '%d Follower', '%d Followers', $followers, 'appza-core' ), $followers );
+				/* translators: %d: number of people this member follows */
+				$payload[ $i ]['followings_count_label'] = sprintf( _n( '%d Following', '%d Followings', $followings, 'appza-core' ), $followings );
 			}
 		}
 
