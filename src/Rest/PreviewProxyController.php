@@ -176,6 +176,72 @@ class PreviewProxyController {
 				// button that can only fail. The cluster gates on this.
 				$payload[ $i ]['is_blocked_by_viewer'] = ( 0 === $follow_level );
 
+				// Whether this viewer may MESSAGE this member, and it is
+				// FluentCommunity's answer rather than ours (2026-09-02).
+				//
+				// `profile_nav_actions` is FC's own per-viewer action list
+				// for a profile; today it holds exactly one entry — Message,
+				// pointing at `/portal/chat?user_id=N`. Reading it here is
+				// the same reasoning as D76, where the profile tab strip
+				// stopped being a list we kept: messaging can be switched
+				// off, a profile can be private, and both rules are FC's to
+				// change. A `show_message` toggle of ours would be a second
+				// copy of them, wrong the day either moves.
+				$can_message = false;
+				if ( isset( $item['profile_nav_actions'] ) && is_array( $item['profile_nav_actions'] ) ) {
+					foreach ( $item['profile_nav_actions'] as $nav_action ) {
+						if ( ! is_array( $nav_action ) ) {
+							continue;
+						}
+						$css = (string) ( $nav_action['css_class'] ?? '' );
+						$url = (string) ( $nav_action['url'] ?? '' );
+						if ( false !== strpos( $css, 'fcom_chat_button' ) || false !== strpos( $url, '/chat?user_id=' ) ) {
+							$can_message = true;
+							break;
+						}
+					}
+				}
+				$payload[ $i ]['can_message'] = $can_message;
+
+				// Whether the VIEWER is a moderator — which nothing on this
+				// row answered. `is_moderator` is FluentCommunity's word for
+				// the SUBJECT ("no" on demo_student's row while raju, an
+				// admin, was looking at it), so the ⋯ menu's
+				// Add To Space/Course row had no flag to gate on.
+				$viewer_roles = $this->viewer_roles( $viewer_id );
+				$payload[ $i ]['viewer_is_moderator'] = $viewer_roles['is_moderator'] || $viewer_roles['is_admin'];
+
+				// The ⋯ menu's two block rows, as POSITIVE fields.
+				//
+				// A menu row's `visible_when` is a truthiness test on a
+				// PATH — there is no negation in that grammar and adding
+				// one would change how every menu in the catalog is read.
+				// So "not blocked" gets its own field, the way
+				// `permissions.can_report` and the rest already do.
+				$is_self = ( $viewer_id > 0 && $profile_user_id === $viewer_id );
+
+				// FluentCommunity refuses a block for three reasons, and
+				// all three are knowable here — so the row is hidden
+				// rather than offered and then refused. MEASURED, not
+				// guessed: tapping Block as raju answered "Sorry, You
+				// cannot block a user as you are a moderator."
+				//
+				// Its rules, in its own order (FollowController::block):
+				// not yourself, not a moderator as the TARGET, and not a
+				// moderator as the VIEWER. That last one uses
+				// `Helper::isModerator()` specifically — a site admin who
+				// is not a community moderator may still block — which is
+				// why this reads the strict flag and the ⋯ menu's
+				// Add To Space/Course row reads the union.
+				$target_is_moderator = ( 'yes' === (string) ( $item['is_moderator'] ?? '' ) );
+				$payload[ $i ]['can_block'] = (
+					! $is_self
+					&& 0 !== $follow_level
+					&& ! $viewer_roles['is_moderator']
+					&& ! $target_is_moderator
+				);
+				$payload[ $i ]['can_unblock'] = ( ! $is_self && 0 === $follow_level );
+
 				// Both counts are WITHHELD rather than zeroed — by the privacy
 				// setting (who_can_see_followers / _followings) and by the
 				// module being off. Default to 0 so the two header buttons
@@ -355,6 +421,64 @@ class PreviewProxyController {
 				$payload[ $i ]['is_following'] = ( null !== $level && '' !== $level && (int) $level > 0 );
 				$payload[ $i ]['is_follower']  = ! empty( $person['is_follower'] );
 				$payload[ $i ]['is_self']      = ( $viewer_id > 0 && (int) ( $person['user_id'] ?? 0 ) === (int) $viewer_id );
+			}
+		}
+
+		// A DM that does not exist yet (2026-09-02).
+		//
+		// FluentCommunity cannot open an empty one-to-one thread:
+		// `POST /chat/threads` validates `message` as REQUIRED and creates
+		// the thread WITH its first message. Its own portal does not
+		// pretend otherwise — the profile's Message button links to
+		// `/portal/chat?user_id=N`, an INTENT rather than a thread.
+		//
+		// So the conversation screen has to be able to draw a person it
+		// has no thread for. Asked for a thread with an `intent_user_id`
+		// and no id, this answers with the same row shape the real
+		// endpoint returns, built from that member's profile: the appbar
+		// gets a name and a face, `can_send_message` is true so the
+		// composer exists, and `id` is 0 — which is what the send handler
+		// reads to know it must create the thread rather than post to it.
+		if ( 'fc-chat-thread' === $ds_slug && empty( $payload ) ) {
+			$decoded_params = json_decode( $params_json, true );
+			$intent_user_id = is_array( $decoded_params ) && isset( $decoded_params['intent_user_id'] )
+				? (int) $decoded_params['intent_user_id']
+				: 0;
+			if ( $intent_user_id > 0 ) {
+				global $wpdb;
+				$profile = $wpdb->get_row(
+					$wpdb->prepare(
+						"SELECT user_id, username, display_name, avatar FROM {$wpdb->prefix}fcom_xprofile WHERE user_id = %d",
+						$intent_user_id
+					),
+					ARRAY_A
+				);
+				if ( is_array( $profile ) ) {
+					$name = (string) ( $profile['display_name'] ?? '' );
+					$payload = array(
+						array(
+							'id'                      => 0,
+							'type'                    => 'user',
+							'title'                   => $name,
+							'photo'                   => (string) ( $profile['avatar'] ?? '' ),
+							'initials'                => $this->initials_for( $name ),
+							'username'                => (string) ( $profile['username'] ?? '' ),
+							'handle'                  => '@' . (string) ( $profile['username'] ?? '' ),
+							'space_slug'              => '',
+							'member_count'            => 2,
+							'is_active_now'           => false,
+							'can_view_members'        => false,
+							// The whole point: a composer on a conversation
+							// that does not exist yet.
+							'can_send_message'        => true,
+							'can_delete_any_messages' => false,
+							'can_leave'               => false,
+							'can_block'               => false,
+							'can_delete_conversation' => false,
+							'intent_user_id'          => $intent_user_id,
+						),
+					);
+				}
 			}
 		}
 
@@ -1531,6 +1655,72 @@ class PreviewProxyController {
 			'blockquote' => array(),
 		);
 		return trim( wp_kses( $html, $allowed ) );
+	}
+
+	/**
+	 * What the CURRENT user is to this community — moderator, admin, or
+	 * neither.
+	 *
+	 * Two flags rather than one because FluentCommunity draws the line in
+	 * two different places: blocking is refused to a MODERATOR
+	 * specifically, while managing members is open to either.
+	 *
+	 * FluentCommunity's own check, called defensively: this proxy runs
+	 * inside a site where the class may be absent (FC deactivated) or may
+	 * move, and a fatal here would take out every profile read rather than
+	 * one menu row.
+	 */
+	protected function viewer_roles( $viewer_id = 0 ) {
+		$none = array( 'is_moderator' => false, 'is_admin' => false );
+		if ( ! class_exists( '\\FluentCommunity\\App\\Services\\Helper' ) ) {
+			return $none;
+		}
+		if ( ! method_exists( '\\FluentCommunity\\App\\Services\\Helper', 'isModerator' ) ) {
+			return $none;
+		}
+
+		// The viewer is set only DURING the upstream sub-request —
+		// fetch_upstream restores the previous user before returning — so by
+		// the time this normalisation runs, get_current_user_id() is 0 again
+		// and every FC helper that reads the current user answers for a
+		// guest. Both of these do. Set the viewer for the length of the
+		// check and put it back, exactly as the sub-request does.
+		$prev_user_id = get_current_user_id();
+		$switched     = ( $viewer_id > 0 && $viewer_id !== $prev_user_id );
+		if ( $switched ) {
+			wp_set_current_user( $viewer_id );
+		}
+
+		$roles = array( 'is_moderator' => false, 'is_admin' => false );
+
+		// isModerator() alone is NOT enough, and the portal proves it: raju
+		// is a WordPress admin who sees "Add To Space/Course" there, and
+		// Helper::isModerator() answers false for him — a community
+		// MODERATOR is a narrower thing than a site admin. Either may manage
+		// members, so the flag is the union; the endpoint remains the real
+		// authority and refuses anyone this lets through by mistake.
+		if ( method_exists( '\\FluentCommunity\\App\\Services\\Helper', 'isSiteAdmin' ) ) {
+			$roles['is_admin'] = (bool) \FluentCommunity\App\Services\Helper::isSiteAdmin( $viewer_id ?: null );
+		}
+		$roles['is_moderator'] = (bool) \FluentCommunity\App\Services\Helper::isModerator();
+
+		if ( $switched ) {
+			wp_set_current_user( $prev_user_id );
+		}
+
+		return $roles;
+	}
+
+	/** Two-letter initials, for an avatar with no photo. */
+	protected function initials_for( $name ) {
+		$parts = preg_split( '/\s+/', trim( (string) $name ) );
+		if ( ! $parts || '' === $parts[0] ) {
+			return '';
+		}
+		$first = mb_substr( $parts[0], 0, 1 );
+		$last  = count( $parts ) > 1 ? mb_substr( $parts[ count( $parts ) - 1 ], 0, 1 ) : '';
+
+		return mb_strtoupper( $first . $last );
 	}
 
 	protected function relative_time( $datetime_str ) {
