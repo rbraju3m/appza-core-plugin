@@ -292,6 +292,72 @@ class PreviewProxyController {
 			}
 		}
 
+		// The two follow lists (2026-09-02).
+		//
+		// FluentCommunity answers both with a FOLLOW row — the pivot —
+		// and hangs the person off a different key in each: `follower` on
+		// /members/followers, `followed` on /members/followings. A card
+		// binds a PATH, not a row (P138), so without flattening them here
+		// the two lists would need two identical cards differing in one
+		// word, and every later change would have to be made twice.
+		//
+		// The derived fields, all of them what the portal draws:
+		//
+		// `profile_byline` — "Joined 8mo ago", plus "· Last seen: 17h ago"
+		// when FC has a last_activity. One string because a row binds one
+		// text, which is the same reason the profile header's byline is
+		// joined in the proxy rather than split across two children.
+		//
+		// `is_following` / `is_self` — the two gates the Follow button
+		// needs. FC ships `follow` as the LEVEL (null when not following,
+		// 0 when blocked, >0 when following), which no visible_when can
+		// compare usefully, and a viewer's own row carries no button at
+		// all — raju appears in demo_student's followers with none.
+		if ( in_array( $ds_slug, array( 'fc-member-followers', 'fc-member-followings' ), true ) && is_array( $payload ) ) {
+			$person_key = 'fc-member-followers' === $ds_slug ? 'follower' : 'followed';
+			foreach ( $payload as $i => $item ) {
+				if ( ! is_array( $item ) ) {
+					continue;
+				}
+				$person = isset( $item[ $person_key ] ) && is_array( $item[ $person_key ] )
+					? $item[ $person_key ]
+					: array();
+				if ( empty( $person ) ) {
+					continue;
+				}
+
+				foreach ( array( 'user_id', 'username', 'display_name', 'avatar', 'permalink', 'total_points', 'short_description' ) as $field ) {
+					if ( isset( $person[ $field ] ) ) {
+						$payload[ $i ][ $field ] = $person[ $field ];
+					}
+				}
+
+				// "@name" as ONE string. fc-member-card does this with a
+				// bespoke renderer transform keyed on its own slug; here
+				// the flattening already runs, so the prefix costs a line
+				// rather than a special case in the render path.
+				if ( ! empty( $person['username'] ) ) {
+					$payload[ $i ]['username_at'] = '@' . $person['username'];
+				}
+
+				$bits = array();
+				if ( ! empty( $person['created_at'] ) ) {
+					/* translators: %s: relative time, e.g. "8mo" */
+					$bits[] = sprintf( __( 'Joined %s ago', 'appza-core' ), $this->relative_time( (string) $person['created_at'] ) );
+				}
+				if ( ! empty( $person['last_activity'] ) ) {
+					/* translators: %s: relative time, e.g. "17h" */
+					$bits[] = sprintf( __( 'Last seen: %s ago', 'appza-core' ), $this->relative_time( (string) $person['last_activity'] ) );
+				}
+				$payload[ $i ]['profile_byline'] = implode( ' · ', $bits );
+
+				$level = isset( $person['follow'] ) ? $person['follow'] : null;
+				$payload[ $i ]['is_following'] = ( null !== $level && '' !== $level && (int) $level > 0 );
+				$payload[ $i ]['is_follower']  = ! empty( $person['is_follower'] );
+				$payload[ $i ]['is_self']      = ( $viewer_id > 0 && (int) ( $person['user_id'] ?? 0 ) === (int) $viewer_id );
+			}
+		}
+
 		// The comment thread under post detail (the 28 FeedPostDetails
 		// designs). Four derivations, all of them shape rather than style:
 		//
