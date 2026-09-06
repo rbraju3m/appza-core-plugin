@@ -180,6 +180,7 @@ class FluentCommunityFeedPermissionsFilter {
 		$canModerate = false;
 		$canEdit     = false;
 		$canDelete   = false;
+		$canMove     = false;
 		$space       = null;
 
 		if ( $currentUser ) {
@@ -200,6 +201,27 @@ class FluentCommunityFeedPermissionsFilter {
 
 			$canEdit   = $this->can_edit( $currentUser, $feed, $space );
 			$canDelete = $this->can_delete( $currentUser, $isAuthor, $space );
+			// "Move to a different space" — the edit screen's checkbox.
+			//
+			// Deliberately NOT the portal's own rule. FluentCommunity's
+			// edit modal shows that checkbox on
+			// `has_pro && hasSpaceModeratorAccess(feed.space)` — a
+			// MODERATOR — and then its own API refuses the write.
+			// FeedsController::update demands `community_admin` for both
+			// halves of the move: on the DESTINATION for `new_space_id`,
+			// on the post's current space for `move_to_profile`. A
+			// moderator who is not an admin gets "Sorry, you do not have
+			// permission to change the space for this post".
+			//
+			// So this is the SERVER's rule, not the portal's — the app
+			// never offers a control the API is going to reject.
+			//
+			// `$space` is null for a profile post, and
+			// hasPermissionOrInCurrentSpace then answers on the global
+			// permission alone. That is right: a profile post can still
+			// be moved INTO a space, and the destination's own admin
+			// check happens on the write.
+			$canMove = (bool) $currentUser->hasPermissionOrInCurrentSpace( 'community_admin', $space );
 		}
 
 		// Every verdict below mirrors FluentCommunity's OWN rule, read out
@@ -236,6 +258,12 @@ class FluentCommunityFeedPermissionsFilter {
 			// the viewer, so it is answered in the catalog's visible_when
 			// rather than folded in here.
 			'can_remove_preview'   => $canDelete,
+			// The edit screen's "Move to a different space" checkbox —
+			// see the derivation above. Rides the feed row because the
+			// edit screen is opened with the tapped post as its mount
+			// context, so the verdict is already in hand before the
+			// composer draws.
+			'can_move_space'       => $canMove,
 			// "Review" on the flagged banner (designs 28 and 34), and it
 			// is deliberately NOT `can_moderate`.
 			//

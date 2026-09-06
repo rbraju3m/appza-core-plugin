@@ -366,6 +366,26 @@ class RestRoutes {
 			)
 		);
 
+		// The edit screen's "Move to a different space" destinations.
+		// A route of ours rather than the composer picker with a filter
+		// on it: that picker answers with the VIEWER's spaces, and
+		// FeedsController::update refuses a move into any space the
+		// POST'S AUTHOR is not an active member of. Same namespace
+		// rationale as users/search above.
+		$move_spaces = new FluentCommunityMoveSpaceOptionsController();
+		register_rest_route(
+			'fcom-mobile/api/v1',
+			'/feeds/move-space-options',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => array( $move_spaces, 'handle' ),
+				'permission_callback' => array( $move_spaces, 'permission_check' ),
+				'args'                => array(
+					'feed_id' => array( 'type' => 'integer', 'required' => true ),
+				),
+			)
+		);
+
 		// Chat — the space CHAT tab and the conversation screen. Three
 		// routes fcom-mobile does not cover: it drops the thread details
 		// from its messages response, every one of its chat routes wants
