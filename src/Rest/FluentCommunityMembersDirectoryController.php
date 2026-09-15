@@ -120,13 +120,21 @@ class FluentCommunityMembersDirectoryController {
 			: array();
 		$badges  = $this->badge_definitions();
 
+		// "Joined 2d" — the catalog's words, our arithmetic. A child binds
+		// one text and there is no prefix binding, so the line is composed
+		// here; `%s` is replaced rather than handed to sprintf.
+		$joined_format = (string) $request->get_param( 'joined_format' );
+		if ( '' === $joined_format ) {
+			$joined_format = __( 'Joined %s', 'appza-core' );
+		}
+
 		$items = array();
 		foreach ( $rows as $row ) {
 			$row = $this->to_array( $row );
 			if ( empty( $row['user_id'] ) ) {
 				continue;
 			}
-			$items[] = $this->directory_row( $row, $viewer, $follows, $badges );
+			$items[] = $this->directory_row( $row, $viewer, $follows, $badges, $joined_format );
 		}
 
 		return $this->ok( $items );
@@ -147,6 +155,17 @@ class FluentCommunityMembersDirectoryController {
 	 */
 	public function summary( \WP_REST_Request $request ) {
 		$viewer = $this->viewer_facts();
+
+		// The status strip asks with this flag and gets NO row unless the
+		// viewer is one the portal shows the tabs to, so the strip's
+		// `hide_when_empty` removes it for everybody else. Answering
+		// "no row" rather than a row of false permissions matters: an
+		// entry gate fails OPEN on a missing bag, so a row-less answer is
+		// the only one a member can never see a tab through.
+		if ( $request->get_param( 'for_status_tabs' ) && ! $viewer['is_admin'] ) {
+			return $this->ok( array() );
+		}
+
 		$answer = $this->ask_fluent_community( $request, $viewer, 1 );
 		$total  = ( null !== $answer && isset( $answer['members']['total'] ) )
 			? (int) $answer['members']['total']
@@ -267,7 +286,7 @@ class FluentCommunityMembersDirectoryController {
 	 * @param array<string, mixed>     $badges   slug => definition
 	 * @return array<string, mixed>
 	 */
-	protected function directory_row( array $row, array $viewer, array $follows, array $badges ) {
+	protected function directory_row( array $row, array $viewer, array $follows, array $badges, $joined_format = 'Joined %s' ) {
 		$user_id  = (int) $row['user_id'];
 		$username = isset( $row['username'] ) ? (string) $row['username'] : '';
 		$meta     = isset( $row['meta'] ) ? $this->to_array( $row['meta'] ) : array();
@@ -312,6 +331,11 @@ class FluentCommunityMembersDirectoryController {
 			// Present only when FluentCommunity lets this viewer see them;
 			// the proxy turns created_at into "2d".
 			'created_at'      => isset( $row['created_at'] ) ? (string) $row['created_at'] : '',
+			// Empty when FluentCommunity withholds the date, so the line's
+			// gate drops it rather than drawing a bare "Joined".
+			'joined_label'    => ! empty( $row['created_at'] )
+				? str_replace( '%s', $this->compact_age( (string) $row['created_at'] ), (string) $joined_format )
+				: '',
 			'last_activity'   => isset( $row['last_activity'] ) ? (string) $row['last_activity'] : '',
 			'headline'        => isset( $meta['headline'] ) ? (string) $meta['headline'] : '',
 			'badge_title'     => $badge['title'],
@@ -436,6 +460,39 @@ class FluentCommunityMembersDirectoryController {
 	/* ---------------------------------------------------------------
 	 * Helpers
 	 * ------------------------------------------------------------- */
+
+	/**
+	 * "2d", "3w"-style age, in exactly the steps the preview proxy's
+	 * relative_time() uses for every other date in the app — a member card
+	 * must not say "1mo" where the profile byline says "30d".
+	 */
+	protected function compact_age( $datetime ) {
+		try {
+			$then = new \DateTime( $datetime, new \DateTimeZone( 'UTC' ) );
+		} catch ( \Exception $e ) {
+			return $datetime;
+		}
+		$diff = time() - $then->getTimestamp();
+		if ( $diff < 0 ) {
+			return $datetime;
+		}
+		if ( $diff < 60 ) {
+			return $diff . 's';
+		}
+		if ( $diff < 3600 ) {
+			return (int) floor( $diff / 60 ) . 'm';
+		}
+		if ( $diff < 86400 ) {
+			return (int) floor( $diff / 3600 ) . 'h';
+		}
+		if ( $diff < 2592000 ) {
+			return (int) floor( $diff / 86400 ) . 'd';
+		}
+		if ( $diff < 31536000 ) {
+			return (int) floor( $diff / 2592000 ) . 'mo';
+		}
+		return (int) floor( $diff / 31536000 ) . 'y';
+	}
 
 	/** Models, paginators and stdClass all come back from FluentCommunity. */
 	protected function to_array( $value ) {

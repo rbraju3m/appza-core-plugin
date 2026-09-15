@@ -589,6 +589,8 @@ class RestRoutes {
 			'status'   => array( 'type' => 'string' ),
 			'page'     => array( 'type' => 'integer' ),
 			'per_page' => array( 'type' => 'integer' ),
+			// "Joined %s" — the card's date line, worded by the catalog.
+			'joined_format' => array( 'type' => 'string' ),
 		);
 
 		register_rest_route(
@@ -611,8 +613,13 @@ class RestRoutes {
 				'permission_callback' => array( $members_directory, 'permission_check' ),
 				'args'                => array_merge(
 					$directory_args,
-					// "Members (%d)" — the catalog's words, the count ours.
-					array( 'title_format' => array( 'type' => 'string' ) )
+					array(
+						// "Members (%d)" — the catalog's words, the count ours.
+						'title_format'    => array( 'type' => 'string' ),
+						// The status strip's own ask: no row for a viewer
+						// who may not see the tabs.
+						'for_status_tabs' => array( 'type' => 'boolean' ),
+					)
 				),
 			)
 		);
