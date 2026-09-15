@@ -570,6 +570,53 @@ class RestRoutes {
 			)
 		);
 
+		// All Members — the directory and the row above it. fcom-mobile's
+		// /members asks the right FluentCommunity endpoint and then keeps
+		// only the rows, dropping the total the title counts and the
+		// viewer's follow levels the ⋮ menu needs. Named `/directory`
+		// because fcom-mobile already owns `/members`. Public read: the
+		// site's "who can view all members" setting decides, inside the
+		// controller. Same namespace rationale as the leaderboard above.
+		$members_directory = new FluentCommunityMembersDirectoryController();
+		$directory_args    = array(
+			'search'   => array( 'type' => 'string' ),
+			// last_activity | display_name | created_at
+			'sort_by'  => array( 'type' => 'string' ),
+			// ASC | DESC — empty keeps FluentCommunity's per-column default.
+			'sort_dir' => array( 'type' => 'string' ),
+			// active | pending | blocked | deactivated — honoured for a
+			// community admin only, as the portal's tabs are.
+			'status'   => array( 'type' => 'string' ),
+			'page'     => array( 'type' => 'integer' ),
+			'per_page' => array( 'type' => 'integer' ),
+		);
+
+		register_rest_route(
+			'fcom-mobile/api/v1',
+			'/members/directory',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => array( $members_directory, 'directory' ),
+				'permission_callback' => array( $members_directory, 'permission_check' ),
+				'args'                => $directory_args,
+			)
+		);
+
+		register_rest_route(
+			'fcom-mobile/api/v1',
+			'/members/directory/summary',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => array( $members_directory, 'summary' ),
+				'permission_callback' => array( $members_directory, 'permission_check' ),
+				'args'                => array_merge(
+					$directory_args,
+					// "Members (%d)" — the catalog's words, the count ours.
+					array( 'title_format' => array( 'type' => 'string' ) )
+				),
+			)
+		);
+
 		register_rest_route(
 			APPZA_CORE_REST_NAMESPACE,
 			'/preview/data',
