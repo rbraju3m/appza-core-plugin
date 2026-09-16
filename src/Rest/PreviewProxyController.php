@@ -330,6 +330,52 @@ class PreviewProxyController {
 				}
 				$payload[ $i ]['about_stats'] = implode( ' · ', $bits );
 
+				// The About card's two iconed rows (designs 1 and 41), which
+				// replaced `about_stats` as what the card draws. The designs
+				// split the one line into rows and spell the units out —
+				// "Joined 9 months ago", "Last seen 10 minutes ago" — where
+				// the stats line compacted them to "8mo". `about_stats` is
+				// left published; nothing is lost by keeping it.
+				//
+				// JOINED reads `created_at_ts`, not `created_at`: the latter
+				// has already been rewritten to "8mo" by normalize_items by
+				// the time this runs.
+				$joined_ts = isset( $item['created_at_ts'] ) ? (int) $item['created_at_ts'] : 0;
+				$payload[ $i ]['joined_label'] = $joined_ts > 0
+					/* translators: %s: a spelled-out age, e.g. "9 months" */
+					? sprintf( __( 'Joined %s ago', 'appza-core' ), $this->long_age( $joined_ts ) )
+					: '';
+
+				// LAST SEEN only exists when FluentCommunity published
+				// `last_activity`, and it publishes it only when Privacy ->
+				// "show last activity" is on. So gating the row on this label
+				// existing IS the doc's condition, read at the source rather
+				// than re-implemented.
+				$last_ts = ! empty( $item['last_activity'] ) && is_string( $item['last_activity'] )
+					? strtotime( $item['last_activity'] . ' UTC' )
+					: false;
+				$payload[ $i ]['last_seen_label'] = $last_ts
+					/* translators: %s: a spelled-out age, e.g. "10 minutes" */
+					? sprintf( __( 'Last seen %s ago', 'appza-core' ), $this->long_age( (int) $last_ts ) )
+					: '';
+
+				// The Additional information cards, READ-ONLY (designs 1 and
+				// 41). Built from FluentCommunity Pro's own grouped key, so
+				// its per-field privacy rules have already run — a card here
+				// only ever holds fields THIS viewer may see.
+				$payload[ $i ]['custom_field_view'] = $this->custom_field_view(
+					isset( $item['custom_field_groups'] ) && is_array( $item['custom_field_groups'] )
+						? $item['custom_field_groups']
+						: array()
+				);
+
+				// The Social Link card, READ-ONLY. The member's handles, each
+				// with its provider's glyph and a link to the full profile —
+				// the view that the edit form's prefix and field compose.
+				$payload[ $i ]['social_link_view'] = $this->social_link_view(
+					isset( $item['social_links'] ) ? (array) $item['social_links'] : array()
+				);
+
 				// Social links arrive as an OBJECT keyed by provider, and a
 				// variadic strip expands an ARRAY. Empty on this box, so the
 				// strip simply draws nothing.
@@ -767,6 +813,177 @@ class PreviewProxyController {
 	 * bookmark state never surfaces there — we query the reactions table
 	 * directly in normalize_items() using the id resolved here.
 	 */
+	/**
+	 * An age spelled out the way the About card's designs write it — "9
+	 * months", "10 minutes" — where relative_time() writes "9mo".
+	 *
+	 * Same boundaries as relative_time(), and deliberately so: a month is
+	 * 30 days there, so it is 30 days here, and the header's byline and
+	 * this card cannot disagree about how long ago the same moment was.
+	 *
+	 * @param int $timestamp Unix time of the moment.
+	 * @return string
+	 */
+	protected function long_age( $timestamp ) {
+		$diff = max( 0, time() - (int) $timestamp );
+
+		if ( $diff < 60 ) {
+			return __( 'a moment', 'appza-core' );
+		}
+		$steps = array(
+			array( 3600, 60, 'minute', 'minutes' ),
+			array( 86400, 3600, 'hour', 'hours' ),
+			array( 2592000, 86400, 'day', 'days' ),
+			array( 31536000, 2592000, 'month', 'months' ),
+		);
+		foreach ( $steps as $step ) {
+			list( $below, $unit, $one, $many ) = $step;
+			if ( $diff < $below ) {
+				$n = (int) floor( $diff / $unit );
+				return sprintf( '%d %s', $n, 1 === $n ? $one : $many );
+			}
+		}
+		$years = (int) floor( $diff / 31536000 );
+		return sprintf( '%d %s', $years, 1 === $years ? 'year' : 'years' );
+	}
+
+	/**
+	 * FluentCommunity Pro's custom-field groups, shaped for READING.
+	 *
+	 * Three things the edit form never needed:
+	 *
+	 *   - Empty fields are DROPPED, and a group with none left is dropped
+	 *     with them. A profile card listing a dozen labels over nothing is
+	 *     noise; the designs draw only answered fields.
+	 *   - Values are FORMATTED. A date is stored as "2026-06-01" and drawn
+	 *     as "Jun 1, 2026"; a multiselect is stored as option keys and
+	 *     drawn as their LABELS joined; a select or radio is its label.
+	 *   - A url is marked, so the row can be a link — design 1 draws it
+	 *     blue.
+	 *
+	 * @param array $groups `custom_field_groups` from the profile row.
+	 * @return array<int,array<string,mixed>>
+	 */
+	protected function custom_field_view( array $groups ) {
+		$cards = array();
+
+		foreach ( $groups as $group ) {
+			if ( ! is_array( $group ) ) {
+				continue;
+			}
+			$rows = array();
+
+			foreach ( (array) ( $group['fields'] ?? array() ) as $field ) {
+				if ( ! is_array( $field ) || ! array_key_exists( 'value', $field ) ) {
+					continue;
+				}
+				$type    = (string) ( $field['type'] ?? 'text' );
+				$value   = $field['value'];
+				$options = isset( $field['options'] ) ? (array) $field['options'] : array();
+				$display = '';
+
+				if ( 'multiselect' === $type ) {
+					$labels = array();
+					foreach ( (array) $value as $key ) {
+						$key      = (string) $key;
+						$labels[] = isset( $options[ $key ] ) ? (string) $options[ $key ] : $key;
+					}
+					$display = implode( ', ', array_filter( $labels, 'strlen' ) );
+				} elseif ( 'date' === $type && is_string( $value ) && '' !== $value ) {
+					$date    = \DateTime::createFromFormat( 'Y-m-d', $value );
+					$display = $date ? $date->format( 'M j, Y' ) : $value;
+				} elseif ( is_scalar( $value ) ) {
+					$display = trim( (string) $value );
+				}
+
+				if ( '' === $display ) {
+					continue;
+				}
+
+				$rows[] = array(
+					'label' => (string) ( $field['label'] ?? '' ),
+					'value' => $display,
+					'href'  => 'url' === $type ? $display : '',
+				);
+			}
+
+			if ( empty( $rows ) ) {
+				continue;
+			}
+
+			$cards[] = array(
+				'heading' => (string) ( $group['label'] ?? '' ),
+				'rows'    => $rows,
+			);
+		}
+
+		return $cards;
+	}
+
+	/**
+	 * The member's social handles, shaped for READING — one card with a
+	 * row per filled-in provider (designs 1 and 41).
+	 *
+	 * The glyph is an IONICON NAME, not FluentCommunity's SVG. Pro ships
+	 * each provider's icon as raw SVG markup, and drawing that means
+	 * injecting HTML; ionicons carries a logo for every provider the
+	 * defaults enable, and a name travels through the catalog like any
+	 * other icon. A provider with no mapped logo draws a plain link glyph.
+	 *
+	 * @param array $stored The member's `social_links` meta.
+	 * @return array<int,array<string,mixed>>
+	 */
+	protected function social_link_view( array $stored ) {
+		$helper    = '\\FluentCommunity\\App\\Services\\ProfileHelper';
+		$providers = class_exists( $helper ) && method_exists( $helper, 'socialLinkProviders' )
+			? (array) call_user_func( array( $helper, 'socialLinkProviders' ), true )
+			: array();
+
+		$glyphs = array(
+			'instagram' => 'logo-instagram',
+			'twitter'   => 'logo-twitter',
+			'youtube'   => 'logo-youtube',
+			'linkedin'  => 'logo-linkedin',
+			'fb'        => 'logo-facebook',
+			'tiktok'    => 'logo-tiktok',
+			'pinterest' => 'logo-pinterest',
+			'reddit'    => 'logo-reddit',
+			'snapchat'  => 'logo-snapchat',
+		);
+
+		$rows = array();
+		foreach ( $stored as $key => $handle ) {
+			if ( ! is_string( $key ) || ! is_scalar( $handle ) ) {
+				continue;
+			}
+			$handle = trim( (string) $handle );
+			// Only providers the site still has ENABLED. A handle left over
+			// from a provider an admin has since switched off is not a link
+			// the community offers any more.
+			if ( '' === $handle || ! isset( $providers[ $key ] ) ) {
+				continue;
+			}
+			$domain = (string) ( ( (array) $providers[ $key ] )['domain'] ?? '' );
+			$rows[] = array(
+				'label' => '',
+				'value' => $handle,
+				'href'  => $domain . ltrim( $handle, '@' ),
+				'icon'  => $glyphs[ $key ] ?? 'link-outline',
+			);
+		}
+
+		if ( empty( $rows ) ) {
+			return array();
+		}
+
+		return array(
+			array(
+				'heading' => __( 'Social Link', 'appza-core' ),
+				'rows'    => $rows,
+			),
+		);
+	}
+
 	/**
 	 * Every social provider the site has ENABLED, with this member's
 	 * handle for it — the edit form's Social Links card (design 40).
