@@ -350,6 +350,15 @@ class PreviewProxyController {
 				$payload[ $i ]['badges']     = $badges;
 				$payload[ $i ]['has_badges'] = ! empty( $badges );
 
+				// The "@syed" line, which designs 1 and 41 draw UNDER the
+				// blue subtitle as its own row. `profile_byline` above is
+				// the old one-line form ("@raju · 24 points") and is left
+				// alone — the About card still composes from it. Same key
+				// the All Members card uses, so one spelling serves both.
+				$payload[ $i ]['username_at'] = ! empty( $item['username'] )
+					? '@' . $item['username']
+					: '';
+
 				// 2. The third header count (design 1: "1 Blocked").
 				// FluentCommunity Pro's FollowHandler publishes followers
 				// and followings and stops there. Blocked is the same table
@@ -722,11 +731,24 @@ class PreviewProxyController {
 			$badge  = (array) $definitions[ $slug ];
 			$config = isset( $badge['config'] ) ? (array) $badge['config'] : array();
 
+			$label = isset( $badge['title'] ) ? (string) $badge['title'] : '';
+			$emoji = isset( $config['emoji'] ) ? (string) $config['emoji'] : '';
+
 			$badges[] = array(
 				'value' => $slug,
-				'label' => isset( $badge['title'] ) ? (string) $badge['title'] : '',
-				'emoji' => isset( $config['emoji'] ) ? (string) $config['emoji'] : '',
+				'label' => $label,
+				'emoji' => $emoji,
 				'logo'  => isset( $config['logo'] ) ? (string) $config['logo'] : '',
+				// The chip draws ONE string, so the emoji is joined to the
+				// title here rather than in two children sharing a cell —
+				// the mistake D69 unpicked on the post card's byline.
+				//
+				// A badge configured with a LOGO instead of an emoji draws
+				// its title alone: an image cannot be inlined into a text
+				// chip, and giving the chip an icon slot would mean a
+				// second child per badge for a case no badge on this box
+				// uses. Stated rather than worked around.
+				'chip_label' => trim( $emoji . ' ' . $label ),
 				// The chip's own colours, which the designs give each badge
 				// individually rather than by a shared token.
 				'text_color' => isset( $config['text_color'] ) ? (string) $config['text_color'] : '',
