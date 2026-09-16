@@ -509,6 +509,35 @@ class PreviewProxyController {
 			}
 		}
 
+		// The profile's SPACES tab: the ⋮ on each card (designs 57, 58).
+		//
+		// "Only super admin will get 3 dots on the spaces." FluentCommunity
+		// lets any space admin remove a member, but the doc narrows it and
+		// the doc wins — isSiteAdmin(), the same verdict the Add to Space
+		// row uses. Never on your own profile: the dialog says "remove this
+		// MEMBER", and leaving a space is a different act with its own
+		// button on the space.
+		//
+		// `profile_member_id` rides on the row because the card is a SPACE
+		// row, and the removal needs to know whose profile it is on.
+		if ( 'fc-member-spaces' === $ds_slug && is_array( $payload ) ) {
+			$params_decoded = json_decode( $params_json, true );
+			$profile_member = is_array( $params_decoded ) ? (int) ( $params_decoded['member_id'] ?? 0 ) : 0;
+			$is_site_admin  = false;
+			if ( $viewer_id > 0 && method_exists( '\\FluentCommunity\\App\\Services\\Helper', 'isSiteAdmin' ) ) {
+				$is_site_admin = (bool) \FluentCommunity\App\Services\Helper::isSiteAdmin( $viewer_id );
+			}
+			foreach ( $payload as $i => $item ) {
+				if ( ! is_array( $item ) ) {
+					continue;
+				}
+				$payload[ $i ]['profile_member_id'] = $profile_member;
+				$payload[ $i ]['can_remove_member'] = $is_site_admin
+					&& $profile_member > 0
+					&& $profile_member !== $viewer_id;
+			}
+		}
+
 		// The profile's COMMENTS tab. Two derivations, both so a row can
 		// be a card:
 		//
@@ -523,6 +552,7 @@ class PreviewProxyController {
 		// without this the tap would arrive at post-detail with nothing to
 		// look up.
 		if ( 'fc-member-comments' === $ds_slug && is_array( $payload ) ) {
+			$comment_avatars = array();
 			foreach ( $payload as $i => $item ) {
 				if ( ! is_array( $item ) ) {
 					continue;
@@ -538,6 +568,32 @@ class PreviewProxyController {
 				}
 				/* translators: %s: the title of the post a comment was left on */
 				$payload[ $i ]['comment_context'] = sprintf( __( 'on %s', 'appza-core' ), $title );
+				// Design 62 draws the title on its own line, bold, with no
+				// "on" in front of it.
+				$payload[ $i ]['post_title'] = $title;
+
+				// The trash icon (designs 62 to 64). The doc puts it on your
+				// OWN profile only, and on your own profile every comment is
+				// yours — so "this comment is the viewer's" is that rule
+				// exactly, and it is also the rule FluentCommunity applies
+				// to a delete by anyone who is not a moderator.
+				$comment_user = (int) ( $item['user_id'] ?? 0 );
+				$payload[ $i ]['can_delete'] = $viewer_id > 0 && $comment_user === $viewer_id;
+
+				// The small avatar at the top of the card: the commenter,
+				// who is the profile's member. A comment row carries only
+				// the POST author's xprofile, so it is looked up — once per
+				// member, since every row on this tab has the same one.
+				if ( $comment_user > 0 && ! array_key_exists( $comment_user, $comment_avatars ) ) {
+					$comment_avatars[ $comment_user ] = '';
+					if ( class_exists( '\\FluentCommunity\\App\\Models\\XProfile' ) ) {
+						$xp = \FluentCommunity\App\Models\XProfile::where( 'user_id', $comment_user )->first();
+						if ( $xp ) {
+							$comment_avatars[ $comment_user ] = (string) $xp->avatar;
+						}
+					}
+				}
+				$payload[ $i ]['avatar'] = $comment_avatars[ $comment_user ] ?? '';
 
 				if ( ! empty( $post['slug'] ) ) {
 					$payload[ $i ]['slug'] = (string) $post['slug'];
