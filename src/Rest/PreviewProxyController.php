@@ -268,6 +268,33 @@ class PreviewProxyController {
 				// binds `readonly`, and a binding cannot negate.
 				$payload[ $i ]['email_readonly'] = empty( $item['can_change_email'] );
 
+				// The edit form's LAST card (design 40). The doc gates it on
+				// Privacy -> "Allow user to deactivate their account directly
+				// from their profile settings", and FluentCommunity's
+				// patchProfile enforces the same rule on the write:
+				// `can_deactive_account === 'yes' || isSiteAdmin()`.
+				//
+				// Published on the ROW rather than left to the bootstrap's
+				// settings block, because it is half viewer and half site —
+				// an admin may deactivate on a site where nobody else can —
+				// and a placement that gated on `settings.*` alone would show
+				// the card to every member on an admin's site.
+				//
+				// Only ever on your OWN profile: the form is only reachable
+				// there, but the flag says so anyway so a future placement
+				// cannot get it wrong.
+				$can_deactivate = false;
+				$utility        = '\\FluentCommunity\\App\\Functions\\Utility';
+				$fc_helper      = '\\FluentCommunity\\App\\Services\\Helper';
+				if ( class_exists( $utility ) ) {
+					$can_deactivate = 'yes' === call_user_func( array( $utility, 'getPrivacySetting' ), 'can_deactive_account' );
+				}
+				if ( ! $can_deactivate && class_exists( $fc_helper ) && method_exists( $fc_helper, 'isSiteAdmin' ) ) {
+					$can_deactivate = (bool) call_user_func( array( $fc_helper, 'isSiteAdmin' ), $viewer_id );
+				}
+				$payload[ $i ]['can_deactivate_account'] = $can_deactivate
+					&& ! empty( $payload[ $i ]['is_self_profile'] );
+
 				// The profile's tab strip, which is FluentCommunity's OWN nav
 				// rather than our copy of it. `profile_navs` is already
 				// filtered per viewer — Spaces and Courses appear only with
