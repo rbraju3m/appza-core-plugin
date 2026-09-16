@@ -466,7 +466,13 @@ class PreviewProxyController {
 		// 0 when blocked, >0 when following), which no visible_when can
 		// compare usefully, and a viewer's own row carries no button at
 		// all — raju appears in demo_student's followers with none.
-		if ( in_array( $ds_slug, array( 'fc-member-followers', 'fc-member-followings' ), true ) && is_array( $payload ) ) {
+		//
+		// `fc-blocked-users` joined them on 2026-09-16 (doc states 34-39).
+		// FluentCommunity Pro's getBlockedUsers returns the SAME pivot —
+		// `Follow::where('level', 0)->with('followed')` — so the person is
+		// under `followed` exactly as on a followings row, and the one card
+		// serves all three lists rather than a third near-copy of it.
+		if ( in_array( $ds_slug, array( 'fc-member-followers', 'fc-member-followings', 'fc-blocked-users' ), true ) && is_array( $payload ) ) {
 			$person_key = 'fc-member-followers' === $ds_slug ? 'follower' : 'followed';
 			foreach ( $payload as $i => $item ) {
 				if ( ! is_array( $item ) ) {
