@@ -319,6 +319,58 @@ class PreviewProxyController {
 					);
 				}
 				$payload[ $i ]['social_link_list'] = $socials;
+
+				// ---------------------------------------------------------
+				// The three the header needs that NO endpoint publishes.
+				// ---------------------------------------------------------
+				//
+				// Everything else on this row arrives intact: fcom-mobile's
+				// /members/profile asks FluentCommunity's own
+				// `/profile/{username}` and passes `data.profile` through
+				// WHOLE, so every field FC Pro appends through the
+				// `fluent_community/profile_view_data` filter is already
+				// here — `custom_field_groups`, `scheduled_posts_count`,
+				// `followers_count`, `followings_count`, `follow`.
+				//
+				// These three are not, because no filter publishes them.
+
+				// 1. The badge chips (designs 1 + 41). The row carries
+				// `badge_slugs`; the DEFINITIONS live in an option the
+				// portal reads separately and resolves client-side. The
+				// appended `badge` attribute on XProfile is a filter
+				// nothing hooks, so it is always null — `meta.badge_slug`
+				// through `user_badges` is the portal's real path, and the
+				// All Members card already reads it the same way.
+				//
+				// The card shows the FIRST badge; the profile shows them
+				// ALL, so this is a list. `has_badges` is the gate, because
+				// a placement's visible_when is a truthiness test on a path
+				// and "a non-empty array" is not one (P159).
+				$badges = $this->resolve_badges( $item );
+				$payload[ $i ]['badges']     = $badges;
+				$payload[ $i ]['has_badges'] = ! empty( $badges );
+
+				// 2. The third header count (design 1: "1 Blocked").
+				// FluentCommunity Pro's FollowHandler publishes followers
+				// and followings and stops there. Blocked is the same table
+				// at level 0 — the people THIS profile has blocked, which
+				// is what its own Blocked tab lists — so it is the profile
+				// owner's fact, not the viewer's, and is safe to count here
+				// where the viewer is only resolved from the auth header.
+				$blocked = $this->blocked_count( $profile_user_id );
+				$payload[ $i ]['blocked_count'] = $blocked;
+				/* translators: %d: how many members this member has blocked */
+				$payload[ $i ]['blocked_count_label'] = sprintf( _n( '%d Blocked', '%d Blocked', $blocked, 'appza-core' ), $blocked );
+
+				// 3. The level bar (designs 1 + 41: "🏆 42 · Level 3 ·
+				// 23 points to level up"). `total_points` is on the row;
+				// the level it lands in, and the distance to the next one,
+				// are the leaderboard's arithmetic. /leaderboard/me already
+				// does this — but only ever for the VIEWER, and this bar
+				// belongs to whoever's profile is open.
+				foreach ( $this->level_facts( $points ) as $key => $value ) {
+					$payload[ $i ][ $key ] = $value;
+				}
 			}
 		}
 
@@ -633,6 +685,198 @@ class PreviewProxyController {
 	 * bookmark state never surfaces there — we query the reactions table
 	 * directly in normalize_items() using the id resolved here.
 	 */
+	/**
+	 * Every badge this member wears that is still DEFINED, resolved from
+	 * the slugs on the row through FluentCommunity Pro's definitions.
+	 *
+	 * The portal reads `meta.badge_slug` against the `user_badges` option
+	 * and resolves the pair in the browser; there is no endpoint that
+	 * returns a resolved badge. A slug whose definition has since been
+	 * deleted is skipped rather than drawn as an empty chip.
+	 *
+	 * `badge_slugs` is on the row already (FluentCommunity puts it there);
+	 * `meta.badge_slug` is the same list one level down, and is read as a
+	 * fallback because the members endpoint publishes only the latter.
+	 *
+	 * @param array $item One profile row.
+	 * @return array<int,array<string,string>>
+	 */
+	protected function resolve_badges( $item ) {
+		$definitions = $this->badge_definitions();
+		if ( empty( $definitions ) ) {
+			return array();
+		}
+
+		$slugs = array();
+		if ( isset( $item['badge_slugs'] ) ) {
+			$slugs = (array) $item['badge_slugs'];
+		} elseif ( isset( $item['meta']['badge_slug'] ) ) {
+			$slugs = (array) $item['meta']['badge_slug'];
+		}
+
+		$badges = array();
+		foreach ( $slugs as $slug ) {
+			if ( ! is_string( $slug ) || ! isset( $definitions[ $slug ] ) ) {
+				continue;
+			}
+			$badge  = (array) $definitions[ $slug ];
+			$config = isset( $badge['config'] ) ? (array) $badge['config'] : array();
+
+			$badges[] = array(
+				'value' => $slug,
+				'label' => isset( $badge['title'] ) ? (string) $badge['title'] : '',
+				'emoji' => isset( $config['emoji'] ) ? (string) $config['emoji'] : '',
+				'logo'  => isset( $config['logo'] ) ? (string) $config['logo'] : '',
+				// The chip's own colours, which the designs give each badge
+				// individually rather than by a shared token.
+				'text_color' => isset( $config['text_color'] ) ? (string) $config['text_color'] : '',
+				'bg_color'   => isset( $config['bg_color'] ) ? (string) $config['bg_color'] : '',
+			);
+		}
+
+		return $badges;
+	}
+
+	/**
+	 * FluentCommunity Pro's badge definitions, keyed by slug. Absent
+	 * option, absent Pro, or a non-array value all mean "no badges".
+	 *
+	 * @return array<string,mixed>
+	 */
+	protected function badge_definitions() {
+		$utility = '\\FluentCommunity\\App\\Functions\\Utility';
+		if ( ! class_exists( $utility ) ) {
+			return array();
+		}
+		$badges = call_user_func( array( $utility, 'getOption' ), 'user_badges', array() );
+		return is_array( $badges ) ? $badges : array();
+	}
+
+	/**
+	 * How many members this member has blocked.
+	 *
+	 * FluentCommunity keeps blocks in the follows table at level 0, which
+	 * is how `/profile/{username}/blocked-users` lists them. Counted
+	 * straight off the model rather than by asking that route, because the
+	 * header needs a NUMBER and the route returns a page of rows — and
+	 * because a second rest_do_request in this process is the trap P134
+	 * names.
+	 *
+	 * `whereHas('followed')` mirrors the count FollowHandler uses for the
+	 * other two, so a block on a user who has since been deleted does not
+	 * inflate the total.
+	 *
+	 * @param int $user_id The profile owner.
+	 * @return int
+	 */
+	protected function blocked_count( $user_id ) {
+		$user_id = (int) $user_id;
+		if ( $user_id < 1 ) {
+			return 0;
+		}
+
+		$model = '\\FluentCommunity\\App\\Models\\XProfile';
+		if ( ! class_exists( $model ) ) {
+			return 0;
+		}
+
+		try {
+			$xprofile = call_user_func( array( $model, 'where' ), 'user_id', $user_id );
+			$xprofile = $xprofile ? $xprofile->first() : null;
+			if ( ! $xprofile || ! method_exists( $xprofile, 'follows' ) ) {
+				return 0;
+			}
+			return (int) $xprofile->follows()->where( 'level', 0 )->whereHas( 'followed' )->count();
+		} catch ( \Throwable $e ) {
+			// FollowController is Pro; on a site without it the relation
+			// is absent and a zero is the honest answer, not a 500.
+			return 0;
+		}
+	}
+
+	/**
+	 * The level bar's numbers for a given points total.
+	 *
+	 * The same arithmetic `/leaderboard/me` does, which is the portal's:
+	 * the next level starts one point past this one's ceiling, and the
+	 * sentence is suppressed at the top level where that ceiling is ten
+	 * billion. Done here because /leaderboard/me only ever answers for the
+	 * VIEWER, and this bar belongs to whoever's profile is open.
+	 *
+	 * Every key is returned even when the module is off, so a field
+	 * mapping never binds a path that is sometimes absent — the labels are
+	 * simply empty and `has_level_bar` gates the placement.
+	 *
+	 * @param int $points The profile owner's points total.
+	 * @return array<string,mixed>
+	 */
+	protected function level_facts( $points ) {
+		$points = max( 0, (int) $points );
+		$none   = array(
+			'has_level_bar'      => false,
+			'level'              => 0,
+			'level_label'        => '',
+			'level_title'        => '',
+			'points_label'       => number_format_i18n( $points ),
+			'points_to_level_up' => 0,
+			'level_up_label'     => '',
+			'is_max_level'       => false,
+		);
+
+		// The same class, feature gate and methods /leaderboard/me uses.
+		// The bar is the leaderboard's, so it goes when the leaderboard
+		// module does — FluentCommunity's portal hides it the same way.
+		$helper = '\\FluentCommunityPro\\App\\Modules\\LeaderBoard\\Services\\LeaderBoardHelper';
+		$fc     = '\\FluentCommunity\\App\\Services\\Helper';
+		if ( ! class_exists( $helper ) || ! class_exists( $fc ) ) {
+			return $none;
+		}
+		if ( ! call_user_func( array( $fc, 'isFeatureEnabled' ), 'leader_board_module' ) ) {
+			return $none;
+		}
+
+		try {
+			$level = (array) call_user_func( array( $helper, 'getLevelByPoint' ), $points );
+			if ( empty( $level ) ) {
+				return $none;
+			}
+
+			// getDynamicLevels merges saved settings over defaults with
+			// wp_parse_args, which preserves KEY order rather than point
+			// order — so "the last level" has to be sorted for, not
+			// assumed. Same sort the levels card applies.
+			$levels = (array) call_user_func( array( $helper, 'getDynamicLevels' ) );
+			$levels = array_values( $levels );
+			usort(
+				$levels,
+				static function ( $a, $b ) {
+					return (int) ( $a['min_points'] ?? 0 ) <=> (int) ( $b['min_points'] ?? 0 );
+				}
+			);
+			$last = end( $levels );
+			$is_max = is_array( $last ) && isset( $last['slug'], $level['slug'] ) && $last['slug'] === $level['slug'];
+
+			$to_level_up = max( 0, (int) ( $level['max_points'] ?? 0 ) - $points + 1 );
+
+			return array(
+				'has_level_bar' => true,
+				'level'         => (int) ( $level['level'] ?? 0 ),
+				/* translators: %d: the level number */
+				'level_label'   => sprintf( __( 'Level %d', 'appza-core' ), (int) ( $level['level'] ?? 0 ) ),
+				'level_title'   => (string) ( $level['title'] ?? '' ),
+				'points_label'  => number_format_i18n( $points ),
+				'points_to_level_up' => $is_max ? 0 : $to_level_up,
+				'level_up_label'     => $is_max
+					? ''
+					/* translators: %s: how many points until the next level */
+					: sprintf( __( '%s points to level up', 'appza-core' ), number_format_i18n( $to_level_up ) ),
+				'is_max_level'  => $is_max,
+			);
+		} catch ( \Throwable $e ) {
+			return $none;
+		}
+	}
+
 	/**
 	 * FluentCommunity's profile navs, as the tab strip's entries.
 	 *
