@@ -359,6 +359,32 @@ class PreviewProxyController {
 					? '@' . $item['username']
 					: '';
 
+				// The own-profile ⋯ menu's Moderation row (design 6), which
+				// the doc gates twice over: "this option will come if
+				// settings page content moderation is enable. This option
+				// will come only for super admins."
+				//
+				// Published as ONE boolean because a menu row's
+				// `visible_when` resolves only `data.*` paths — `settings.*`
+				// reads as undefined there, which is indistinguishable from
+				// false, so the site's half of the rule has to be answered
+				// here rather than in the catalog. A placement's gate is the
+				// one that can read settings; a menu row's cannot (P159).
+				//
+				// `viewer_is_moderator` is already on the row above, decided
+				// while the viewer is still the viewer (P158).
+				$moderation_on = false;
+				$helper        = '\\FluentCommunity\\App\\Services\\Helper';
+				if ( class_exists( $helper ) && method_exists( $helper, 'isFeatureEnabled' ) ) {
+					$moderation_on = (bool) call_user_func( array( $helper, 'isFeatureEnabled' ), 'content_moderation' );
+				}
+				// Read from $payload, NOT $item: `viewer_is_moderator` is
+				// derived earlier in this same loop and written to the
+				// payload row. $item is the untouched upstream row and has
+				// never carried it, so reading it there is a silent false.
+				$payload[ $i ]['can_moderate'] = $moderation_on
+					&& ! empty( $payload[ $i ]['viewer_is_moderator'] );
+
 				// 2. The third header count (design 1: "1 Blocked").
 				// FluentCommunity Pro's FollowHandler publishes followers
 				// and followings and stops there. Blocked is the same table
