@@ -295,6 +295,19 @@ class PreviewProxyController {
 				$payload[ $i ]['can_deactivate_account'] = $can_deactivate
 					&& ! empty( $payload[ $i ]['is_self_profile'] );
 
+				// The ⋯ sheet's "Add to Space/Course" row (doc state 49:
+				// "only for Superadmin"). FluentCommunity agrees: the list
+				// the portal builds its picker from is behind AdminPolicy,
+				// which is isSiteAdmin(). D82 gated this on the moderator
+				// verdict, which offered the row to a community moderator
+				// who could never load its sheet.
+				$can_add_to_space = false;
+				if ( class_exists( $fc_helper ) && method_exists( $fc_helper, 'isSiteAdmin' ) ) {
+					$can_add_to_space = (bool) call_user_func( array( $fc_helper, 'isSiteAdmin' ), $viewer_id );
+				}
+				$payload[ $i ]['can_add_to_space'] = $can_add_to_space
+					&& empty( $payload[ $i ]['is_self_profile'] );
+
 				// The profile's tab strip, which is FluentCommunity's OWN nav
 				// rather than our copy of it. `profile_navs` is already
 				// filtered per viewer — Spaces and Courses appear only with

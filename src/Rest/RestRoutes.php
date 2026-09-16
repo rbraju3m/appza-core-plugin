@@ -386,6 +386,23 @@ class RestRoutes {
 			)
 		);
 
+		// A member profile's "Add to Space or Course" sheet: the spaces
+		// and courses the member is not already in. See the controller
+		// for the portal behaviour it mirrors.
+		$add_to_space = new FluentCommunityAddToSpaceOptionsController();
+		register_rest_route(
+			'fcom-mobile/api/v1',
+			'/members/add-to-options',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => array( $add_to_space, 'handle' ),
+				'permission_callback' => array( $add_to_space, 'permission_check' ),
+				'args'                => array(
+					'user_id' => array( 'type' => 'integer', 'required' => true ),
+				),
+			)
+		);
+
 		// Chat — the space CHAT tab and the conversation screen. Three
 		// routes fcom-mobile does not cover: it drops the thread details
 		// from its messages response, every one of its chat routes wants
