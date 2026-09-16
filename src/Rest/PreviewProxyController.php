@@ -347,6 +347,20 @@ class PreviewProxyController {
 				}
 				$payload[ $i ]['social_link_list'] = $socials;
 
+				// The EDIT form's Social Links card (design 40), which is a
+				// different question from the list above: that one is what
+				// this member has FILLED IN, this one is every provider the
+				// site offers, whether filled in or not.
+				//
+				// Joined here because neither half is any use alone. The
+				// providers are FluentCommunity's — title, the domain it
+				// draws as a grey prefix, and its own placeholder — and the
+				// values are the member's, stored as bare HANDLES keyed by
+				// provider rather than as URLs. A card built from either
+				// side alone would draw empty rows or lose the labels.
+				$payload[ $i ]['social_link_fields'] = $this->social_link_fields( $raw_socials );
+				$payload[ $i ]['has_social_links']   = ! empty( $payload[ $i ]['social_link_fields'] );
+
 				// ---------------------------------------------------------
 				// The three the header needs that NO endpoint publishes.
 				// ---------------------------------------------------------
@@ -753,6 +767,63 @@ class PreviewProxyController {
 	 * bookmark state never surfaces there — we query the reactions table
 	 * directly in normalize_items() using the id resolved here.
 	 */
+	/**
+	 * Every social provider the site has ENABLED, with this member's
+	 * handle for it — the edit form's Social Links card (design 40).
+	 *
+	 * FluentCommunity keeps the two apart: the providers are a site
+	 * setting (`profile_link_providers`, read through
+	 * `ProfileHelper::socialLinkProviders`) and the handles are profile
+	 * meta. The card needs both on every row, so they are joined here
+	 * rather than in two fetches the form would have to reconcile.
+	 *
+	 * `enabledOnly` is the doc's condition for this card: "Comes if
+	 * settings -> Feature & Addons -> Profile Social Media Links is enable
+	 * & the options will also come based on the enable options." An empty
+	 * list is the honest answer for a site that has enabled none, and
+	 * `has_social_links` is what hides the card.
+	 *
+	 * The value is a bare HANDLE, not a URL — that is how
+	 * `updateProfile` stores it, and the domain beside it is a label.
+	 *
+	 * @param array $stored  The member's `social_links` meta.
+	 * @return array<int,array<string,string>>
+	 */
+	protected function social_link_fields( array $stored ) {
+		$helper = '\\FluentCommunity\\App\\Services\\ProfileHelper';
+		if ( ! class_exists( $helper ) || ! method_exists( $helper, 'socialLinkProviders' ) ) {
+			return array();
+		}
+
+		$providers = call_user_func( array( $helper, 'socialLinkProviders' ), true );
+		if ( ! is_array( $providers ) ) {
+			return array();
+		}
+
+		$fields = array();
+		foreach ( $providers as $key => $provider ) {
+			if ( ! is_string( $key ) ) {
+				continue;
+			}
+			$provider = (array) $provider;
+			$value    = isset( $stored[ $key ] ) && is_scalar( $stored[ $key ] )
+				? (string) $stored[ $key ]
+				: '';
+
+			$fields[] = array(
+				'key'         => $key,
+				'label'       => isset( $provider['title'] ) ? (string) $provider['title'] : $key,
+				// Drawn as the grey prefix box. FluentCommunity calls it
+				// the domain and never stores it with the handle.
+				'domain'      => isset( $provider['domain'] ) ? (string) $provider['domain'] : '',
+				'placeholder' => isset( $provider['placeholder'] ) ? (string) $provider['placeholder'] : '',
+				'value'       => $value,
+			);
+		}
+
+		return $fields;
+	}
+
 	/**
 	 * Every badge this member wears that is still DEFINED, resolved from
 	 * the slugs on the row through FluentCommunity Pro's definitions.
