@@ -1218,11 +1218,28 @@ class PreviewProxyController {
 				// chip, and giving the chip an icon slot would mean a
 				// second child per badge for a case no badge on this box
 				// uses. Stated rather than worked around.
-				'chip_label' => trim( $emoji . ' ' . $label ),
+				//
+				// "Show Label on Badge" off is the portal's `user_icon_only`:
+				// the emoji alone. With no emoji there is nothing else a
+				// text chip can draw, so the title stays.
+				'chip_label' => ( isset( $badge['show_label'] ) && 'no' === $badge['show_label'] && '' !== $emoji )
+					? $emoji
+					: trim( $emoji . ' ' . $label ),
 				// The chip's own colours, which the designs give each badge
 				// individually rather than by a shared token.
-				'text_color' => isset( $config['text_color'] ) ? (string) $config['text_color'] : '',
-				'bg_color'   => isset( $config['bg_color'] ) ? (string) $config['bg_color'] : '',
+				//
+				// FluentCommunity Pro stores them at the badge's TOP level as
+				// `color` and `background_color` (UserBadgeController's
+				// santizeBadge; the portal paints `color` on the border too).
+				// This read `config.text_color` / `config.bg_color` until
+				// 2026-09-17 — keys Pro never writes, so every chip drew
+				// uncoloured. Found the first time a badge was defined here.
+				'text_color' => isset( $badge['color'] ) && '' !== $badge['color']
+					? (string) $badge['color']
+					: ( isset( $config['text_color'] ) ? (string) $config['text_color'] : '' ),
+				'bg_color'   => isset( $badge['background_color'] ) && '' !== $badge['background_color']
+					? (string) $badge['background_color']
+					: ( isset( $config['bg_color'] ) ? (string) $config['bg_color'] : '' ),
 			);
 		}
 
