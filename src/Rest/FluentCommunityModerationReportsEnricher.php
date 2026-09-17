@@ -1,7 +1,8 @@
 <?php
 /**
  * Hooks `rest_request_after_callbacks` to give each moderation report row
- * the three strings the review modal draws (Noor's design 30), so the
+ * the three strings the review modal draws (Noor's design 30), and the
+ * card and menu fields of the Moderation screen (doc states 7–32), so the
  * shells bind values instead of branching.
  *
  * Same hook and the same reason as FluentCommunityFeedPermissionsFilter:
@@ -109,6 +110,90 @@ class FluentCommunityModerationReportsEnricher {
 		if ( ! empty( $row['created_at'] ) && is_string( $row['created_at'] ) ) {
 			$row['created_at_relative'] = $this->relative_time( $row['created_at'] );
 		}
+
+		return $this->add_content_fields( $row, '' === $who && '' === $label );
+	}
+
+	/**
+	 * The Moderation screen's card and menu (doc states 7–32, 2026-09-17).
+	 *
+	 * A report row carries the content it is about twice over — `post`
+	 * always, `comment` too when a comment was reported — and a child binds
+	 * one flat path. So the fields the card draws are lifted from whichever
+	 * of the two the report is about: its author, its words, whether it has
+	 * media, and how many reports it carries.
+	 *
+	 * @param array<string, mixed> $row
+	 * @return array<string, mixed>
+	 */
+	protected function add_content_fields( array $row, $is_auto ) {
+		$is_comment = isset( $row['content_type'] ) && 'comment' === $row['content_type'];
+		$post       = isset( $row['post'] ) && is_array( $row['post'] ) ? $row['post'] : array();
+		$comment    = isset( $row['comment'] ) && is_array( $row['comment'] ) ? $row['comment'] : array();
+		$content    = $is_comment ? $comment : $post;
+
+		$row['content_id']         = isset( $content['id'] ) ? (int) $content['id'] : 0;
+		$row['content_type_label'] = $is_comment ? __( 'Comment', 'appza-core' ) : __( 'Post', 'appza-core' );
+
+		$author = isset( $content['xprofile'] ) && is_array( $content['xprofile'] ) ? $content['xprofile'] : array();
+		$row['author_name']   = isset( $author['display_name'] ) ? (string) $author['display_name'] : '';
+		$row['author_avatar'] = isset( $author['avatar'] ) ? (string) $author['avatar'] : '';
+		$row['content_created_at_relative'] = ! empty( $content['created_at'] ) && is_string( $content['created_at'] )
+			? $this->relative_time( $content['created_at'] )
+			: '';
+
+		$space = isset( $post['space'] ) && is_array( $post['space'] ) ? $post['space'] : array();
+		$row['space_title'] = isset( $space['title'] ) ? (string) $space['title'] : '';
+
+		// Plain text from the raw message: the card draws a line of words,
+		// and FluentCommunity's own `title` here is a 160-character human
+		// excerpt that the review modal's Details tab already uses.
+		$plain = isset( $content['message'] ) ? wp_strip_all_tags( (string) $content['message'] ) : '';
+		$plain = trim( (string) preg_replace( '/\s+/u', ' ', $plain ) );
+		$row['excerpt'] = mb_strlen( $plain ) > 140 ? rtrim( mb_substr( $plain, 0, 140 ) ) . '…' : $plain;
+		$row['content_body_html'] = isset( $content['message_rendered'] ) ? (string) $content['message_rendered'] : '';
+
+		// Design 7's clapperboard under the words. A post's media is its
+		// oEmbed preview, its featured image or its uploaded media; a comment
+		// carries only the first and the last.
+		$meta = isset( $content['meta'] ) && is_array( $content['meta'] ) ? $content['meta'] : array();
+		$row['has_media'] = ! empty( $meta['media_preview'] ) || ! empty( $meta['media_items'] ) || ! empty( $content['featured_image'] );
+
+		// Design 7's chip. `reports_count` on the row is FluentCommunity's
+		// count for that content at the time this report was filed.
+		$count = isset( $row['reports_count'] ) ? max( 1, (int) $row['reports_count'] ) : 1;
+		/* translators: %d: number of reports on the content */
+		$row['reports_count_label'] = sprintf( _n( '%d report', '%d reports', $count, 'appza-core' ), $count );
+
+		$row['content_status']  = isset( $content['status'] ) ? (string) $content['status'] : '';
+		$row['is_content_live'] = 'published' === $row['content_status'];
+		$row['is_auto_flagged'] = $is_auto
+			|| ( isset( $row['meta']['flagged_by'] ) && 'auto' === $row['meta']['flagged_by'] );
+
+		// Which rows and buttons a report offers, per tab — Noor's designs.
+		// Published as POSITIVE booleans because a menu row's visible_when
+		// is a truthiness test with AND and no OR or negation (P159), and
+		// the modal reads the same fields so the two can never disagree
+		// with the table in .scratch/moderation/plan.md:
+		//
+		//   status        menu (8, 16, 25, 30)            modal (9, 17, 26, 31)
+		//   pending       dismiss, unpublish              dismiss, unpublish
+		//   flagged       approve, publish, delete        dismiss, unpublish
+		//   ignored       unpublish, delete               unpublish, delete
+		//   unpublished   approve, delete                 publish, delete
+		//
+		// Review is on every row, so it has no field. Delete removes the
+		// REPORT and leaves the content (Noor, 2026-09-17).
+		$status = isset( $row['status'] ) ? (string) $row['status'] : '';
+		$row['menu_can_dismiss']     = 'pending' === $status;
+		$row['menu_can_approve']     = in_array( $status, array( 'flagged', 'unpublished' ), true );
+		$row['menu_can_publish']     = 'flagged' === $status;
+		$row['menu_can_unpublish']   = in_array( $status, array( 'pending', 'ignored' ), true );
+		$row['menu_can_delete']      = in_array( $status, array( 'flagged', 'ignored', 'unpublished' ), true );
+		$row['review_can_dismiss']   = in_array( $status, array( 'pending', 'flagged' ), true );
+		$row['review_can_unpublish'] = in_array( $status, array( 'pending', 'flagged', 'ignored' ), true );
+		$row['review_can_publish']   = 'unpublished' === $status;
+		$row['review_can_delete']    = in_array( $status, array( 'ignored', 'unpublished' ), true );
 
 		return $row;
 	}
