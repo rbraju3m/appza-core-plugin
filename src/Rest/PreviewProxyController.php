@@ -497,6 +497,17 @@ class PreviewProxyController {
 				/* translators: %d: how many members this member has blocked */
 				$payload[ $i ]['blocked_count_label'] = sprintf( _n( '%d Blocked', '%d Blocked', $blocked, 'appza-core' ), $blocked );
 
+				// "You have 2 scheduled posts" (design 65). FluentCommunity
+				// Pro's getScheduledPost adds the count only when there is
+				// at least one AND the viewer is the owner or a site admin,
+				// so its absence is the banner's whole gate — nothing is
+				// published when there is no count, and nothing is invented.
+				if ( isset( $item['scheduled_posts_count'] ) && (int) $item['scheduled_posts_count'] > 0 ) {
+					$scheduled = (int) $item['scheduled_posts_count'];
+					/* translators: %d: how many posts the member has scheduled */
+					$payload[ $i ]['scheduled_posts_label'] = sprintf( _n( 'You have %d scheduled post', 'You have %d scheduled posts', $scheduled, 'appza-core' ), $scheduled );
+				}
+
 				// 3. The level bar (designs 1 + 41: "🏆 42 · Level 3 ·
 				// 23 points to level up"). `total_points` is on the row;
 				// the level it lands in, and the distance to the next one,
@@ -670,6 +681,49 @@ class PreviewProxyController {
 				$payload[ $i ]['is_following'] = ( null !== $level && '' !== $level && (int) $level > 0 );
 				$payload[ $i ]['is_follower']  = ! empty( $person['is_follower'] );
 				$payload[ $i ]['is_self']      = ( $viewer_id > 0 && (int) ( $person['user_id'] ?? 0 ) === (int) $viewer_id );
+			}
+		}
+
+		// The Scheduled Posts page (doc state 66).
+		//
+		// FluentCommunity nests the author under `xprofile` and the space
+		// under `space`, and a card child binds one flat string — so both
+		// are lifted here, as the follow lists lift their person.
+		//
+		// `scheduled_for_label` — "Scheduled for Sep 26, 2026, 3:45 PM".
+		// `scheduled_at` is the SITE's wall-clock (Pro formats it in
+		// wp_timezone()), so it is read in that zone and printed as is, not
+		// shifted into the device's.
+		//
+		// `excerpt` — the body as plain text, from the raw `message`:
+		// `message_rendered` has already been through sanitize_rich_text
+		// above, and the card draws one line of words, not markup.
+		if ( 'fc-scheduled-posts' === $ds_slug && is_array( $payload ) ) {
+			foreach ( $payload as $i => $item ) {
+				if ( ! is_array( $item ) ) {
+					continue;
+				}
+				$author = isset( $item['xprofile'] ) && is_array( $item['xprofile'] ) ? $item['xprofile'] : array();
+				$payload[ $i ]['author_name']   = isset( $author['display_name'] ) ? (string) $author['display_name'] : '';
+				$payload[ $i ]['author_avatar'] = isset( $author['avatar'] ) ? (string) $author['avatar'] : '';
+
+				$space = isset( $item['space'] ) && is_array( $item['space'] ) ? $item['space'] : array();
+				$payload[ $i ]['space_title'] = isset( $space['title'] ) ? (string) $space['title'] : '';
+
+				$payload[ $i ]['title'] = isset( $item['title'] ) ? (string) $item['title'] : '';
+
+				$payload[ $i ]['scheduled_for_label'] = '';
+				if ( ! empty( $item['scheduled_at'] ) ) {
+					$when = date_create_immutable_from_format( 'Y-m-d H:i:s', (string) $item['scheduled_at'], wp_timezone() );
+					if ( $when ) {
+						/* translators: %s: date and time, e.g. "Sep 26, 2026, 3:45 PM" */
+						$payload[ $i ]['scheduled_for_label'] = sprintf( __( 'Scheduled for %s', 'appza-core' ), $when->format( 'M j, Y, g:i A' ) );
+					}
+				}
+
+				$plain = isset( $item['message'] ) ? wp_strip_all_tags( (string) $item['message'] ) : '';
+				$plain = trim( preg_replace( '/\s+/u', ' ', $plain ) );
+				$payload[ $i ]['excerpt'] = mb_strlen( $plain ) > 140 ? rtrim( mb_substr( $plain, 0, 140 ) ) . '…' : $plain;
 			}
 		}
 
