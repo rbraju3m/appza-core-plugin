@@ -107,6 +107,8 @@ class FluentCommunityModerationReportsEnricher {
 
 		$row['reason_label'] = $label;
 		$row['reporter_name'] = $who;
+		// Design 12's face beside the reporter's name. An auto-flag has none.
+		$row['reporter_avatar'] = $reporter && isset( $reporter['avatar'] ) && is_string( $reporter['avatar'] ) ? $reporter['avatar'] : '';
 		if ( ! empty( $row['created_at'] ) && is_string( $row['created_at'] ) ) {
 			$row['created_at_relative'] = $this->relative_time( $row['created_at'] );
 		}
@@ -153,11 +155,27 @@ class FluentCommunityModerationReportsEnricher {
 		$row['excerpt'] = mb_strlen( $plain ) > 140 ? rtrim( mb_substr( $plain, 0, 140 ) ) . '…' : $plain;
 		$row['content_body_html'] = isset( $content['message_rendered'] ) ? (string) $content['message_rendered'] : '';
 
+		// The review modal's Details box (designs 9, 26, 31): a bold title
+		// over the words. Only a post has one — FluentCommunity fills it
+		// with an excerpt when the author wrote none, as its portal shows.
+		$row['content_title'] = ! $is_comment && isset( $post['title'] ) ? (string) $post['title'] : '';
+
 		// Design 7's clapperboard under the words. A post's media is its
 		// oEmbed preview, its featured image or its uploaded media; a comment
 		// carries only the first and the last.
 		$meta = isset( $content['meta'] ) && is_array( $content['meta'] ) ? $content['meta'] : array();
 		$row['has_media'] = ! empty( $meta['media_preview'] ) || ! empty( $meta['media_items'] ) || ! empty( $content['featured_image'] );
+		// Design 9's picture under the words: the oEmbed's thumbnail, the
+		// featured image, or the first uploaded item — whichever exists.
+		$media_url = '';
+		if ( isset( $meta['media_preview']['image'] ) && is_string( $meta['media_preview']['image'] ) ) {
+			$media_url = $meta['media_preview']['image'];
+		} elseif ( ! empty( $content['featured_image'] ) && is_string( $content['featured_image'] ) ) {
+			$media_url = $content['featured_image'];
+		} elseif ( isset( $meta['media_items'][0]['url'] ) && is_string( $meta['media_items'][0]['url'] ) ) {
+			$media_url = $meta['media_items'][0]['url'];
+		}
+		$row['content_media_url'] = $media_url;
 
 		// Design 7's chip. `reports_count` on the row is FluentCommunity's
 		// count for that content at the time this report was filed.
