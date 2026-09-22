@@ -488,6 +488,93 @@ class FluentCommunityCoursesController {
 		return $this->ok( $items );
 	}
 
+	/* ---------------------------------------------------------------
+	 * GET /courses/detail/students — the Students page (states 8–10)
+	 *
+	 * FluentCommunity's `CourseAdminController::getCourseStudents`, one
+	 * in-process read: its search (name or username), its three sorts
+	 * (display_name · created_at = enrolled · last_activity) and both
+	 * directions, and its progress (completed ÷ published lessons). Ours:
+	 * "@username", "Enrolled 2h" and "0%" — words from the catalog.
+	 * FC's route is the gate: a non-admin gets its refusal and no rows.
+	 * ------------------------------------------------------------- */
+
+	public function detail_students( \WP_REST_Request $request ) {
+		$course_id = (int) $request->get_param( 'course_id' );
+		if ( $course_id <= 0 ) {
+			return $this->refused( __( 'Course ID is required.', 'appza-core' ) );
+		}
+		$sort_by  = sanitize_key( (string) $request->get_param( 'sort_by' ) );
+		$sort_dir = strtoupper( sanitize_key( (string) $request->get_param( 'sort_dir' ) ) );
+
+		$fc = new \WP_REST_Request( 'GET', '/fluent-community/v2/admin/courses/' . $course_id . '/students' );
+		$fc->set_query_params(
+			array_filter(
+				array(
+					'search'   => sanitize_text_field( (string) $request->get_param( 'search' ) ),
+					'sort_by'  => in_array( $sort_by, array( 'display_name', 'created_at', 'last_activity' ), true ) ? $sort_by : 'created_at',
+					'sort_dir' => in_array( $sort_dir, array( 'ASC', 'DESC' ), true ) ? $sort_dir : '',
+					'per_page' => 100,
+				),
+				'strlen'
+			)
+		);
+		$response = rest_do_request( $fc );
+		$data     = $response instanceof \WP_REST_Response ? $response->get_data() : null;
+		if ( ! $response instanceof \WP_REST_Response || $response->get_status() >= 400 || ! is_array( $data ) ) {
+			$message = is_array( $data ) && ! empty( $data['message'] ) ? (string) $data['message'] : __( 'Sorry, you are not allowed to do that.', 'appza-core' );
+			return $this->refused( $message );
+		}
+		$data = json_decode( wp_json_encode( $data ), true );
+		$rows = isset( $data['students']['data'] ) ? (array) $data['students']['data'] : array();
+
+		$enrolled_format = $this->word( $request, 'enrolled_format', __( 'Enrolled %s', 'appza-core' ) );
+		$items           = array();
+		foreach ( $rows as $row ) {
+			$username = (string) ( $row['username'] ?? '' );
+			$progress = max( 0, min( 100, (int) ( $row['progress'] ?? 0 ) ) );
+			// The enrolment, not the account: FC's pivot row for THIS course.
+			$enrolled = (string) ( $row['space_pivot']['created_at'] ?? ( $row['created_at'] ?? '' ) );
+			$items[]  = array(
+				'user_id'        => (int) $row['user_id'],
+				'display_name'   => (string) ( $row['display_name'] ?? '' ),
+				'username_at'    => '' !== $username ? '@' . $username : '',
+				'avatar'         => (string) ( $row['avatar'] ?? '' ),
+				'enrolled_at'    => $enrolled,
+				'enrolled_label' => '' !== $enrolled ? str_replace( '%s', $this->compact_age( $enrolled ), $enrolled_format ) : '',
+				'last_activity'  => (string) ( $row['last_activity'] ?? '' ),
+				'progress'       => $progress,
+				'progress_label' => $progress . '%',
+				'course_id'      => $course_id,
+			);
+		}
+		return $this->ok( $items );
+	}
+
+	/** "2h", "3d", "2mo" — the designs' compact age (All Members' rule). */
+	protected function compact_age( $datetime ) {
+		try {
+			$then = new \DateTime( $datetime, new \DateTimeZone( 'UTC' ) );
+		} catch ( \Exception $e ) {
+			return (string) $datetime;
+		}
+		$diff = time() - $then->getTimestamp();
+		if ( $diff < 60 ) {
+			return max( 0, $diff ) . 's';
+		}
+		foreach ( array( 31536000 => 'y', 2592000 => 'mo', 86400 => 'd', 3600 => 'h', 60 => 'm' ) as $unit => $suffix ) {
+			if ( $diff >= $unit ) {
+				return (int) floor( $diff / $unit ) . $suffix;
+			}
+		}
+		return '0s';
+	}
+
+	protected function word( \WP_REST_Request $request, $key, $fallback ) {
+		$value = $request->get_param( $key );
+		return is_string( $value ) && '' !== trim( $value ) ? sanitize_text_field( $value ) : $fallback;
+	}
+
 	/**
 	 * One lesson row. `status` picks the leading glyph and `type` the
 	 * trailing tag, each through the catalog's prop_map, so both glyphs

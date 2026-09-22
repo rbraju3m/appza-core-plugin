@@ -698,6 +698,25 @@ class RestRoutes {
 				),
 			)
 		);
+		// The course's Students page (Courses doc, states 8–10): FC's own
+		// admin list, one read, with the card's words. FC's admin route
+		// decides who may read it; everyone else gets its refusal.
+		register_rest_route(
+			'fcom-mobile/api/v1',
+			'/courses/detail/students',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => array( $courses, 'detail_students' ),
+				'permission_callback' => array( $courses, 'permission_check' ),
+				'args'                => array(
+					'course_id' => array( 'type' => 'integer', 'required' => true ),
+					'search'    => array( 'type' => 'string' ),
+					// created_at (default) | display_name | last_activity
+					'sort_by'   => array( 'type' => 'string' ),
+					'sort_dir'  => array( 'type' => 'string' ),
+				),
+			)
+		);
 
 		register_rest_route(
 			APPZA_CORE_REST_NAMESPACE,
