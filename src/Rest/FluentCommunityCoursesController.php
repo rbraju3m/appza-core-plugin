@@ -377,7 +377,7 @@ class FluentCommunityCoursesController {
 			'lesson_many'      => __( '%d lessons', 'appza-core' ),
 			'student_one'      => __( '%d student', 'appza-core' ),
 			'student_many'     => __( '%d students', 'appza-core' ),
-			'counts_separator' => ' . ',
+			'counts_separator' => '.',
 			'progress_format'  => __( '%d% COMPLETE', 'appza-core' ),
 			'paid_note'        => __( 'lifetime access. Enrollment opens on the web.', 'appza-core' ),
 		);
@@ -386,11 +386,11 @@ class FluentCommunityCoursesController {
 			$value         = $request->get_param( $key );
 			$words[ $key ] = is_string( $value ) && '' !== $value ? sanitize_text_field( $value ) : $default;
 		}
-		// sanitize_text_field trims, which would eat the separator's spaces.
-		$sep = $request->get_param( 'counts_separator' );
-		if ( is_string( $sep ) && '' !== $sep ) {
-			$words['counts_separator'] = wp_strip_all_tags( $sep );
-		}
+		// The separator is padded here: a leading or trailing space does
+		// not survive the trip from the catalog through the preview proxy
+		// ("1 section.1 lesson" on the first photograph).
+		$sep = trim( wp_strip_all_tags( (string) $request->get_param( 'counts_separator' ) ) );
+		$words['counts_separator'] = ' ' . ( '' !== $sep ? $sep : '.' ) . ' ';
 		return $words;
 	}
 
