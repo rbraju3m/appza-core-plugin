@@ -551,6 +551,200 @@ class FluentCommunityCoursesController {
 		return $this->ok( $items );
 	}
 
+	/* ---------------------------------------------------------------
+	 * GET /courses/lesson — the lesson screen (Courses doc, states 16–17)
+	 *
+	 * Two FluentCommunity reads: the course's by-slug (for the viewer's
+	 * lesson list — "Lesson X of Y", < and > — and the track: enrolled,
+	 * completed lessons) and the lesson's by-slug (content, media, and
+	 * every lock: FC's own `resolveLessonAccess` and `getAccessMessage`,
+	 * whose sentences are the doc's). Nothing about access is decided here.
+	 *
+	 * No `lesson_slug` opens the viewer's next lesson — the first one they
+	 * may open and have not completed — which is what START / CONTINUE
+	 * mean on the details (state 5 / 7) and what a screen opened with no
+	 * lesson falls back to.
+	 *
+	 * ALWAYS one row. A refusal (unpublished course, secret course, a
+	 * lesson that does not exist) is a row with `is_refused` and FC's
+	 * sentence as the lock title, so the lock card draws it with Back to
+	 * Course — the sentence differs per refusal, which a verdict cannot
+	 * carry.
+	 * ------------------------------------------------------------- */
+
+	public function lesson( \WP_REST_Request $request ) {
+		$position_format = $this->word( $request, 'position_format', __( 'Lesson %1$d of %2$d', 'appza-core' ) );
+		$not_found       = __( 'Lesson not found. maybe the lesson is not published yet!', 'fluent-community' );
+
+		$read = $this->read_course( $request );
+		if ( is_string( $read ) ) {
+			return $this->ok( array( $this->refused_lesson( $read ) ) );
+		}
+		$course   = $read['course'];
+		$track    = isset( $read['track'] ) && is_array( $read['track'] ) ? $read['track'] : array();
+		$sections = isset( $read['sections'] ) && is_array( $read['sections'] ) ? $read['sections'] : array();
+		$done_ids = isset( $track['completed_lessons'] ) ? array_map( 'intval', (array) $track['completed_lessons'] ) : array();
+		$enrolled = ! empty( $track['isEnrolled'] );
+
+		// The viewer's lessons in course order — FC's own list, drafts
+		// only for the course admin, as the details draw it.
+		$order = array();
+		foreach ( $sections as $section ) {
+			foreach ( (array) ( $section['lessons'] ?? array() ) as $row ) {
+				$order[] = (string) ( $row['slug'] ?? '' );
+			}
+		}
+
+		$slug = sanitize_title( (string) $request->get_param( 'lesson_slug' ) );
+		if ( '' === $slug ) {
+			$slug = $this->next_lesson_slug( $sections, $done_ids );
+		}
+		if ( '' === $slug ) {
+			return $this->ok( array( $this->refused_lesson( $not_found ) ) );
+		}
+
+		$response = rest_do_request( new \WP_REST_Request( 'GET', '/fluent-community/v2/courses/' . sanitize_title( (string) $course['slug'] ) . '/lessons/' . $slug . '/by-slug' ) );
+		$data     = $response instanceof \WP_REST_Response ? $response->get_data() : null;
+		$status   = $response instanceof \WP_REST_Response ? $response->get_status() : 500;
+		if ( $status >= 400 || ! is_array( $data ) || empty( $data['lesson'] ) ) {
+			$message = is_array( $data ) && ! empty( $data['message'] ) ? (string) $data['message'] : '';
+			// A slug that matches no lesson is FC's firstOrFail — a model
+			// exception, not a sentence. FC's own wording for it instead.
+			if ( '' === $message || false !== strpos( $message, 'No query results' ) ) {
+				$message = $not_found;
+			}
+			return $this->ok( array( $this->refused_lesson( $message ) ) );
+		}
+		$lesson = json_decode( wp_json_encode( $data['lesson'] ), true );
+
+		$id       = (int) $lesson['id'];
+		$can_view = ! empty( $lesson['can_view'] );
+		$meta     = isset( $lesson['meta'] ) && is_array( $lesson['meta'] ) ? $lesson['meta'] : array();
+		$media    = isset( $meta['media'] ) && is_array( $meta['media'] ) ? $meta['media'] : array();
+
+		// "Lesson 4 of 5", and the neighbours < > move to.
+		$index = array_search( (string) $lesson['slug'], $order, true );
+		$index = false === $index ? -1 : (int) $index;
+		$total = count( $order );
+		$prev  = $index > 0 ? $order[ $index - 1 ] : '';
+		$next  = $index >= 0 && $index < $total - 1 ? $order[ $index + 1 ] : '';
+
+		// The video: FC's media on the lesson, when the lesson shows media.
+		$video_url = '';
+		if ( $can_view && 'yes' === ( $meta['enable_media'] ?? '' ) ) {
+			// An oembed's own iframe src is the embeddable URL; its `url`
+			// is the watch page, which refuses to be framed.
+			if ( ! empty( $media['video_url'] ) ) {
+				$video_url = (string) $media['video_url'];
+			} elseif ( preg_match( '#<iframe[^>]+src="([^"]+)"#', (string) ( $media['html'] ?? '' ), $m ) ) {
+				$video_url = html_entity_decode( $m[1], ENT_QUOTES );
+			} elseif ( 'video' === ( $media['content_type'] ?? '' ) && ! empty( $media['url'] ) ) {
+				$video_url = (string) $media['url'];
+			}
+		}
+
+		// The poster: FC's image when the media has one, else YouTube's
+		// own thumbnail (fcom-mobile's rule), so the card is not blank
+		// before play (design 16).
+		$poster = '' !== $video_url ? (string) ( $media['image'] ?? '' ) : '';
+		if ( '' !== $video_url && '' === $poster && preg_match( '#youtu(?:\.be/|be\.com/(?:embed/|watch\?v=))([A-Za-z0-9_-]{6,})#', $video_url . ' ' . (string) ( $media['url'] ?? '' ), $m ) ) {
+			$poster = 'https://img.youtube.com/vi/' . $m[1] . '/hqdefault.jpg';
+		}
+
+		// FC's lock: the h1 and the p of its own locker markup.
+		$lock_title   = '';
+		$lock_message = '';
+		if ( ! $can_view ) {
+			$html = (string) ( $lesson['access_message'] ?? '' );
+			if ( preg_match( '#<h1[^>]*>(.*?)</h1>#s', $html, $m ) ) {
+				$lock_title = trim( html_entity_decode( wp_strip_all_tags( $m[1] ), ENT_QUOTES ) );
+			}
+			if ( preg_match( '#<p[^>]*>(.*?)</p>#s', $html, $m ) ) {
+				$lock_message = trim( html_entity_decode( wp_strip_all_tags( $m[1] ), ENT_QUOTES ) );
+			}
+			if ( '' === $lock_title ) {
+				$lock_title = __( 'This lesson is currently locked', 'fluent-community' );
+			}
+		}
+
+		$content = $can_view ? trim( wp_kses_post( (string) ( $lesson['content'] ?? '' ) ) ) : '';
+		$done    = in_array( $id, $done_ids, true );
+
+		$row = array_merge(
+			$this->refused_lesson( '' ),
+			array(
+				'id'              => $id,
+				'slug'            => (string) $lesson['slug'],
+				'title'           => (string) $lesson['title'],
+				'course_id'       => (int) $course['id'],
+				'course_slug'     => (string) $course['slug'],
+				'type'            => 'quiz' === ( $lesson['content_type'] ?? '' ) ? 'quiz' : ( '' !== $video_url ? 'video' : 'text' ),
+				'position_label'  => $index >= 0 ? str_replace( array( '%1$d', '%2$d' ), array( number_format_i18n( $index + 1 ), number_format_i18n( $total ) ), $position_format ) : '',
+				// One lesson has nowhere to go (design 16 draws no arrows).
+				'has_nav'         => $total > 1,
+				'has_prev'        => '' !== $prev,
+				'has_next'        => '' !== $next,
+				'prev_slug'       => $prev,
+				'next_slug'       => $next,
+				'can_view'        => $can_view,
+				'has_video'       => '' !== $video_url,
+				'video_url'       => $video_url,
+				'video_poster'    => $poster,
+				'has_content'     => '' !== trim( wp_strip_all_tags( $content ) ),
+				'content_html'    => $content,
+				'is_locked'       => ! $can_view,
+				'is_refused'      => false,
+				'lock_title'      => $lock_title,
+				'lock_message'    => $lock_message,
+				'is_enrolled'     => $enrolled,
+				'is_course_admin' => ! empty( $course['is_course_admin'] ),
+				// State 16: the viewer may watch without being enrolled — the
+				// course admin, or anyone on a public self-paced course with
+				// Public lesson view ON — so START COURSE takes the place of
+				// Complete Lesson. State 17: a student completes; a completed
+				// lesson reads COMPLETED LESSON, and tapping it undoes.
+				'cta_start'       => $can_view && ! $enrolled,
+				'cta_complete'    => $can_view && $enrolled && ! $done,
+				'cta_completed'   => $can_view && $enrolled && $done,
+			)
+		);
+
+		return $this->ok( array( $row ) );
+	}
+
+	/** The lesson screen's row for a refusal: FC's sentence on the lock card. */
+	protected function refused_lesson( $message ) {
+		return array(
+			'id'              => 0,
+			'slug'            => '',
+			'title'           => '',
+			'course_id'       => 0,
+			'course_slug'     => '',
+			'type'            => 'text',
+			'position_label'  => '',
+			'has_nav'         => false,
+			'has_prev'        => false,
+			'has_next'        => false,
+			'prev_slug'       => '',
+			'next_slug'       => '',
+			'can_view'        => false,
+			'has_video'       => false,
+			'video_url'       => '',
+			'video_poster'    => '',
+			'has_content'     => false,
+			'content_html'    => '',
+			'is_locked'       => true,
+			'is_refused'      => true,
+			'lock_title'      => (string) $message,
+			'lock_message'    => '',
+			'is_enrolled'     => false,
+			'is_course_admin' => false,
+			'cta_start'       => false,
+			'cta_complete'    => false,
+			'cta_completed'   => false,
+		);
+	}
+
 	/** "2h", "3d", "2mo" — the designs' compact age (All Members' rule). */
 	protected function compact_age( $datetime ) {
 		try {

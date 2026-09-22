@@ -718,6 +718,25 @@ class RestRoutes {
 			)
 		);
 
+		// The lesson screen (Courses doc, states 16–17): one row — position,
+		// neighbours, video, content, FC's lock, and which header button
+		// draws. No lesson_slug opens the viewer's next lesson. Public read,
+		// as FC's lesson by-slug is; FC decides every lock and refusal.
+		register_rest_route(
+			'fcom-mobile/api/v1',
+			'/courses/lesson',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => array( $courses, 'lesson' ),
+				'permission_callback' => array( $courses, 'permission_check' ),
+				'args'                => array(
+					'course_slug'     => array( 'type' => 'string', 'required' => true ),
+					'lesson_slug'     => array( 'type' => 'string' ),
+					'position_format' => array( 'type' => 'string' ),
+				),
+			)
+		);
+
 		register_rest_route(
 			APPZA_CORE_REST_NAMESPACE,
 			'/preview/data',
