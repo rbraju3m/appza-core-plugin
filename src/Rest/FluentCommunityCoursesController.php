@@ -706,10 +706,108 @@ class FluentCommunityCoursesController {
 				'cta_start'       => $can_view && ! $enrolled,
 				'cta_complete'    => $can_view && $enrolled && ! $done,
 				'cta_completed'   => $can_view && $enrolled && $done,
-			)
+			),
+			$this->quiz_fields( $lesson, (int) $course['id'], $can_view, $enrolled )
 		);
 
 		return $this->ok( array( $row ) );
+	}
+
+	/**
+	 * The quiz under a quiz lesson (Courses doc, states 18–21). FC Pro's
+	 * questions — the lesson meta, correct flags already stripped by FC —
+	 * and, for an enrolled viewer, FC's saved result for them (its own
+	 * `/quiz/result`, which already hides the verdicts when the quiz has
+	 * Hide result ON). Grading, attempts and pass/fail stay FC's.
+	 *
+	 * The app draws single choice and true/false as radios and multiple
+	 * choice as checkboxes (the doc's two kinds); any other FC question
+	 * type is listed with `supported` false.
+	 *
+	 * @param array<string, mixed> $lesson
+	 * @return array<string, mixed>
+	 */
+	protected function quiz_fields( array $lesson, $course_id, $can_view, $enrolled ) {
+		$meta    = isset( $lesson['meta'] ) && is_array( $lesson['meta'] ) ? $lesson['meta'] : array();
+		$is_quiz = $can_view && 'quiz' === ( $lesson['content_type'] ?? '' );
+		$fields  = array(
+			'is_quiz'          => $is_quiz,
+			'quiz_questions'   => array(),
+			'quiz_can_submit'  => false,
+			'quiz_hide_result' => false,
+			'quiz_has_result'  => false,
+			'quiz_result'      => null,
+		);
+		if ( ! $is_quiz ) {
+			return $fields;
+		}
+
+		$questions = array();
+		foreach ( (array) ( $meta['quiz_questions'] ?? array() ) as $question ) {
+			if ( empty( $question['enabled'] ) || empty( $question['slug'] ) ) {
+				continue;
+			}
+			$type    = (string) ( $question['type'] ?? '' );
+			$options = array();
+			foreach ( (array) ( $question['options'] ?? array() ) as $option ) {
+				if ( isset( $option['label'] ) && '' !== (string) $option['label'] ) {
+					$options[] = array( 'label' => (string) $option['label'] );
+				}
+			}
+			$questions[] = array(
+				'slug'      => (string) $question['slug'],
+				'type'      => $type,
+				'label'     => trim( html_entity_decode( wp_strip_all_tags( (string) ( $question['label_rendered'] ?? ( $question['label'] ?? '' ) ) ), ENT_QUOTES ) ),
+				'multiple'  => 'multiple_choice' === $type,
+				'supported' => in_array( $type, array( 'single_choice', 'true_false', 'multiple_choice' ), true ),
+				'options'   => $options,
+			);
+		}
+		$fields['quiz_questions']   = $questions;
+		$fields['quiz_can_submit']  = $enrolled;
+		$fields['quiz_hide_result'] = 'yes' === ( $meta['hide_result'] ?? '' );
+
+		if ( $enrolled ) {
+			$response = rest_do_request( new \WP_REST_Request( 'GET', '/fluent-community/v2/courses/' . (int) $course_id . '/lessons/' . (int) $lesson['id'] . '/quiz/result' ) );
+			$data     = $response instanceof \WP_REST_Response && $response->get_status() < 400 ? json_decode( wp_json_encode( $response->get_data() ), true ) : null;
+			$result   = is_array( $data ) && ! empty( $data['result'] ) && is_array( $data['result'] ) ? $data['result'] : null;
+			if ( $result ) {
+				$fields['quiz_has_result'] = true;
+				$fields['quiz_result']     = $this->quiz_result_row( $result );
+			}
+		}
+		return $fields;
+	}
+
+	/**
+	 * FC's quiz result, flattened for the card: status (passed | failed |
+	 * published), score, "2/2", attempts, and per question the viewer's
+	 * answer and — unless FC hid it — whether it was right.
+	 *
+	 * @param array<string, mixed> $result
+	 * @return array<string, mixed>
+	 */
+	protected function quiz_result_row( array $result ) {
+		$meta    = isset( $result['meta'] ) && is_array( $result['meta'] ) ? $result['meta'] : array();
+		$answers = array();
+		foreach ( (array) ( $result['message'] ?? array() ) as $slug => $answer ) {
+			if ( ! is_array( $answer ) ) {
+				continue;
+			}
+			$answers[ (string) $slug ] = array(
+				'user_answer' => $answer['user_answer'] ?? null,
+				// null = hidden (Hide result ON): no verdict to draw.
+				'is_correct'  => array_key_exists( 'is_correct', $answer ) ? (bool) $answer['is_correct'] : null,
+			);
+		}
+		return array(
+			'status'   => (string) ( $result['status'] ?? '' ),
+			'score'    => (int) ( $result['score'] ?? 0 ),
+			'correct'  => (int) ( $meta['correct_answers'] ?? 0 ),
+			'total'    => (int) ( $meta['total_questions'] ?? 0 ),
+			'attempts' => (int) ( $meta['attempts'] ?? 0 ),
+			'answers'  => (object) $answers,
+		);
 	}
 
 	/** The lesson screen's row for a refusal: FC's sentence on the lock card. */
@@ -742,6 +840,12 @@ class FluentCommunityCoursesController {
 			'cta_start'       => false,
 			'cta_complete'    => false,
 			'cta_completed'   => false,
+			'is_quiz'          => false,
+			'quiz_questions'   => array(),
+			'quiz_can_submit'  => false,
+			'quiz_hide_result' => false,
+			'quiz_has_result'  => false,
+			'quiz_result'      => null,
 		);
 	}
 
