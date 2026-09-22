@@ -641,6 +641,34 @@ class RestRoutes {
 			)
 		);
 
+		// Course list — All Courses and My Courses (Courses doc, states
+		// 1–4). fcom-mobile's /courses has the filters but no progress,
+		// its /all-courses has progress but no filters, and neither says
+		// whether a course is paid or shows a secret course to its admin.
+		// Named `/catalog` because fcom-mobile owns `/courses`. Public
+		// read, as FluentCommunity's is. Same namespace rationale as the
+		// leaderboard above.
+		$courses = new FluentCommunityCoursesController();
+		register_rest_route(
+			'fcom-mobile/api/v1',
+			'/courses/catalog',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => array( $courses, 'catalog' ),
+				'permission_callback' => array( $courses, 'permission_check' ),
+				'args'                => array(
+					'search'     => array( 'type' => 'string' ),
+					'topic_slug' => array( 'type' => 'string' ),
+					// alphabetical (default) | latest | oldest — FC's keys.
+					'sort_by'    => array( 'type' => 'string' ),
+					// empty = All Courses; `enrolled` = My Courses.
+					'type'       => array( 'type' => 'string' ),
+					'page'       => array( 'type' => 'integer' ),
+					'per_page'   => array( 'type' => 'integer' ),
+				),
+			)
+		);
+
 		register_rest_route(
 			APPZA_CORE_REST_NAMESPACE,
 			'/preview/data',

@@ -23,6 +23,7 @@ use AppzaCore\Plugin\Rest\FluentCommunityMediaCap;
 use AppzaCore\Plugin\Rest\FluentCommunityMediaGalleryEnricher;
 use AppzaCore\Plugin\Rest\FluentCommunityMemberUpdateCompleter;
 use AppzaCore\Plugin\Rest\FluentCommunityMemberUsernameShim;
+use AppzaCore\Plugin\Rest\FluentCommunityCoursesController;
 use AppzaCore\Plugin\Rest\FluentCommunityModerationReportsEnricher;
 use AppzaCore\Plugin\Rest\FluentCommunitySpaceConfigEnricher;
 use AppzaCore\Plugin\Rest\FluentCommunityComposerEnricher;
@@ -149,6 +150,10 @@ class Appza_Core_Plugin {
 		// member route takes `member_id`. Translated before dispatch so the
 		// profile's five tabs stay addressed by one number.
 		$fcMemberUsername = new FluentCommunityMemberUsernameShim();
+		// Switches off legacy appza-builder's course filter, which turns
+		// every course read FluentCommunity refuses into a 500 (P179).
+		// Same class as the /courses/catalog route; see its docblock.
+		$fcCourses = new FluentCommunityCoursesController();
 		$this->loader->add_action( 'rest_api_init', $rest, 'register_routes' );
 		$this->loader->add_action( 'rest_api_init', $auth, 'register_routes' );
 		$this->loader->add_action( 'rest_api_init', $fcFeedPerms, 'register_hooks' );
@@ -159,6 +164,7 @@ class Appza_Core_Plugin {
 		$this->loader->add_action( 'rest_api_init', $fcModerationReports, 'register_hooks' );
 		$this->loader->add_action( 'rest_api_init', $fcMemberUpdate, 'register_hooks' );
 		$this->loader->add_action( 'rest_api_init', $fcMemberUsername, 'register_hooks' );
+		$this->loader->add_action( 'rest_api_init', $fcCourses, 'register_hooks' );
 		$this->loader->add_action( 'rest_api_init', $previewCache, 'register_hooks' );
 		// Filter needs to be up whenever FC processes a feed write —
 		// which happens through rest_api_init for the mobile endpoint,
