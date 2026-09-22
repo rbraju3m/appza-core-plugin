@@ -669,6 +669,36 @@ class RestRoutes {
 			)
 		);
 
+		// Course details (Courses doc, states 5–7): the header, the
+		// instructor and the one bottom button, then the sections with
+		// their lessons. Two routes over one FluentCommunity read because
+		// the screen draws the sections as rows of their own. Public read,
+		// as FC's by-slug is; FC decides every refusal.
+		register_rest_route(
+			'fcom-mobile/api/v1',
+			'/courses/detail',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => array( $courses, 'detail' ),
+				'permission_callback' => array( $courses, 'permission_check' ),
+				'args'                => array(
+					'course_slug' => array( 'type' => 'string', 'required' => true ),
+				),
+			)
+		);
+		register_rest_route(
+			'fcom-mobile/api/v1',
+			'/courses/detail/sections',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => array( $courses, 'detail_sections' ),
+				'permission_callback' => array( $courses, 'permission_check' ),
+				'args'                => array(
+					'course_slug' => array( 'type' => 'string', 'required' => true ),
+				),
+			)
+		);
+
 		register_rest_route(
 			APPZA_CORE_REST_NAMESPACE,
 			'/preview/data',

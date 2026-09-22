@@ -362,6 +362,238 @@ class FluentCommunityCoursesController {
 		return $out;
 	}
 
+	/* ---------------------------------------------------------------
+	 * GET /courses/detail          — the course (one row)
+	 * GET /courses/detail/sections — its sections, lessons inside
+	 *
+	 * Courses doc, states 5–7. Both read FluentCommunity's own
+	 * `/courses/{slug}/by-slug`, ONE rest_do_request per HTTP request
+	 * (P134), so every lock, every refusal and the admin's draft lessons
+	 * are FC's `processCourse` — nothing about access is re-decided here.
+	 * What is ours: the words, the counts, and which ONE bottom button
+	 * draws.
+	 *
+	 * A refusal ("Course not found. maybe the course is not published
+	 * yet!", "You must need to be invited to view this course") answers
+	 * 200 with no rows and FC's sentence as the message: the header
+	 * publishes the empty verdict and the screen's not-found card reads
+	 * it (D80/D83).
+	 * ------------------------------------------------------------- */
+
+	public function detail( \WP_REST_Request $request ) {
+		$read = $this->read_course( $request );
+		if ( is_string( $read ) ) {
+			return $this->refused( $read );
+		}
+		$course = $read['course'];
+		$track  = isset( $read['track'] ) && is_array( $read['track'] ) ? $read['track'] : array();
+		$words  = $this->words( $request );
+
+		$id       = (int) $course['id'];
+		$settings = isset( $course['settings'] ) && is_array( $course['settings'] ) ? $course['settings'] : array();
+		$is_admin = ! empty( $course['is_course_admin'] );
+		$enrolled = ! empty( $track['isEnrolled'] );
+		$progress = isset( $track['progress'] ) ? (int) $track['progress'] : 0;
+		$done_ids = isset( $track['completed_lessons'] ) ? array_map( 'intval', (array) $track['completed_lessons'] ) : array();
+
+		$sections = isset( $read['sections'] ) && is_array( $read['sections'] ) ? $read['sections'] : array();
+		$lessons  = 0;
+		foreach ( $sections as $section ) {
+			$lessons += count( (array) ( $section['lessons'] ?? array() ) );
+		}
+
+		// Doc state 5's bottom button. A student or the course admin
+		// learns; anyone else is offered the one way in FC allows them.
+		$learner  = $enrolled || $is_admin;
+		$paywalls = $learner ? array() : $this->paywall_products( (object) $course, $settings );
+		$product  = $paywalls ? $paywalls[0] : null;
+		$variant  = $product && ! empty( $product['variants'] ) ? $product['variants'][0] : null;
+		$public   = 'public' === ( $course['privacy'] ?? '' );
+
+		// The instructor card — FC leaves `creator` off when the course
+		// hides its instructor view, and so does the screen.
+		$creator = isset( $course['creator'] ) && is_array( $course['creator'] ) ? $course['creator'] : null;
+		$hidden  = isset( $settings['hide_instructor_view'] ) && 'yes' === $settings['hide_instructor_view'];
+
+		$row = array(
+			'id'                       => $id,
+			'slug'                     => (string) $course['slug'],
+			'title'                    => (string) $course['title'],
+			'privacy'                  => (string) ( $course['privacy'] ?? '' ),
+			'status'                   => (string) ( $course['status'] ?? '' ),
+			// "X sections . Y lessons" — the lessons THIS viewer is shown
+			// (a student never counts a draft), as the list below them.
+			'counts_label'             => $this->plural( count( $sections ), $words['section_one'], $words['section_many'] )
+				. $words['counts_separator']
+				. $this->plural( $lessons, $words['lesson_one'], $words['lesson_many'] ),
+			// "Course description (the long description)" — FC's course
+			// details, as text; the short description when there are none.
+			// The "Course content" heading draws only over sections.
+			'has_sections'             => count( $sections ) > 0,
+			'description'              => $this->plain_text(
+				'' !== (string) ( $settings['course_details_rendered'] ?? '' )
+					? (string) $settings['course_details_rendered']
+					: (string) ( $course['description'] ?? '' )
+			),
+			'is_course_admin'          => $is_admin,
+			'is_enrolled'              => $enrolled,
+			'progress'                 => $progress,
+			'show_instructor'          => $creator && ! $hidden,
+			'instructor_name'          => $creator ? (string) ( $creator['display_name'] ?? '' ) : '',
+			'instructor_avatar'        => $creator ? (string) ( $creator['avatar'] ?? '' ) : '',
+			'instructor_courses_label' => $creator ? $this->plural( (int) ( $creator['total_courses'] ?? 0 ), $words['course_one'], $words['course_many'] ) : '',
+			'cta_start'                => $learner && 0 === count( $done_ids ) && $progress < 100,
+			'cta_continue'             => $learner && count( $done_ids ) > 0 && $progress < 100,
+			'cta_review'               => $learner && $progress >= 100,
+			'cta_paywall'              => ! $learner && null !== $product,
+			// A guest is offered it too: FC answers them with its own
+			// "You need to login to enroll in this course." (state 5).
+			'cta_enroll'               => ! $learner && null === $product && $public,
+			// Private (secret never gets this far — FC refuses it).
+			'cta_invite'               => ! $learner && null === $product && ! $public,
+			'paywall_title'            => $product ? (string) $product['title'] : '',
+			'paywall_price'            => $variant ? (string) $variant['total_price'] : '',
+			'paywall_url'              => $variant ? (string) $variant['checkout_url'] : '',
+			// Where START / CONTINUE lands — the lesson screen (chunk 4).
+			'next_lesson_slug'         => $this->next_lesson_slug( $sections, $done_ids ),
+		);
+
+		return $this->ok( array( $row ) );
+	}
+
+	public function detail_sections( \WP_REST_Request $request ) {
+		$read = $this->read_course( $request );
+		if ( is_string( $read ) ) {
+			return $this->refused( $read );
+		}
+		$words    = $this->words( $request );
+		$track    = isset( $read['track'] ) && is_array( $read['track'] ) ? $read['track'] : array();
+		$done_ids = isset( $track['completed_lessons'] ) ? array_map( 'intval', (array) $track['completed_lessons'] ) : array();
+
+		$items = array();
+		foreach ( (array) ( $read['sections'] ?? array() ) as $section ) {
+			$lessons = array();
+			foreach ( (array) ( $section['lessons'] ?? array() ) as $lesson ) {
+				$lessons[] = $this->lesson_row( $lesson, $done_ids );
+			}
+			$items[] = array(
+				'id'            => (int) $section['id'],
+				'slug'          => (string) ( $section['slug'] ?? '' ),
+				'title'         => (string) $section['title'],
+				'lessons_label' => $this->plural( count( $lessons ), $words['lesson_one'], $words['lesson_many'] ),
+				'is_locked'     => ! empty( $section['is_locked'] ),
+				'lessons'       => $lessons,
+			);
+		}
+		return $this->ok( $items );
+	}
+
+	/**
+	 * One lesson row. `status` picks the leading glyph and `type` the
+	 * trailing tag, each through the catalog's prop_map, so both glyphs
+	 * and the word "Quiz" stay right-panel props.
+	 *
+	 * status, first that holds: locked · done · video · open.
+	 * The doc: "video lessons show a play icon and quiz lessons carry a
+	 * Quiz tag". A lesson is a video when FC's media on it is one — FC's
+	 * own content_type stays `text` for a lesson with an embedded video.
+	 *
+	 * @param array<string, mixed> $lesson
+	 * @param int[]                $done_ids
+	 * @return array<string, mixed>
+	 */
+	protected function lesson_row( array $lesson, array $done_ids ) {
+		$id       = (int) $lesson['id'];
+		$meta     = isset( $lesson['meta'] ) && is_array( $lesson['meta'] ) ? $lesson['meta'] : array();
+		$is_video = 'video' === ( $lesson['content_type'] ?? '' )
+			|| 'video' === ( $meta['media']['content_type'] ?? '' );
+		$is_quiz  = 'quiz' === ( $lesson['content_type'] ?? '' );
+
+		if ( ! empty( $lesson['is_locked'] ) ) {
+			$status = 'locked';
+		} elseif ( in_array( $id, $done_ids, true ) ) {
+			$status = 'done';
+		} elseif ( $is_video ) {
+			$status = 'video';
+		} else {
+			$status = 'open';
+		}
+
+		return array(
+			'id'        => $id,
+			'slug'      => (string) ( $lesson['slug'] ?? '' ),
+			'title'     => (string) $lesson['title'],
+			'status'    => $status,
+			// Stamped as the row's data-value, so the stylesheet can colour
+			// the play glyph blue (design 6) without a prop per status.
+			'value'     => $status,
+			'type'      => $is_quiz ? 'quiz' : ( $is_video ? 'video' : 'text' ),
+			'is_locked' => ! empty( $lesson['is_locked'] ),
+			'lock_type' => (string) ( $lesson['lock_type'] ?? '' ),
+		);
+	}
+
+	/**
+	 * The first lesson this viewer may open that they have not completed;
+	 * the first they may open at all when every one is done.
+	 *
+	 * @param array<int, array<string, mixed>> $sections
+	 * @param int[]                            $done_ids
+	 */
+	protected function next_lesson_slug( array $sections, array $done_ids ) {
+		$first = '';
+		foreach ( $sections as $section ) {
+			foreach ( (array) ( $section['lessons'] ?? array() ) as $lesson ) {
+				if ( empty( $lesson['can_view'] ) ) {
+					continue;
+				}
+				if ( '' === $first ) {
+					$first = (string) $lesson['slug'];
+				}
+				if ( ! in_array( (int) $lesson['id'], $done_ids, true ) ) {
+					return (string) $lesson['slug'];
+				}
+			}
+		}
+		return $first;
+	}
+
+	/**
+	 * FluentCommunity's by-slug, in-process. Returns FC's payload, or FC's
+	 * sentence when it refuses.
+	 *
+	 * @return array<string, mixed>|string
+	 */
+	protected function read_course( \WP_REST_Request $request ) {
+		$slug = sanitize_title( (string) $request->get_param( 'course_slug' ) );
+		if ( '' === $slug ) {
+			return __( 'Course slug is required.', 'appza-core' );
+		}
+		$response = rest_do_request( new \WP_REST_Request( 'GET', '/fluent-community/v2/courses/' . $slug . '/by-slug' ) );
+		$data     = $response instanceof \WP_REST_Response ? $response->get_data() : null;
+		$status   = $response instanceof \WP_REST_Response ? $response->get_status() : 500;
+		if ( $status >= 400 || ! is_array( $data ) || empty( $data['course'] ) ) {
+			$message = is_array( $data ) && ! empty( $data['message'] ) ? (string) $data['message'] : '';
+			return '' !== $message ? $message : __( 'Course not found. maybe the course is not published yet!', 'fluent-community' );
+		}
+		// FC hands back its models; the rows below read plain arrays.
+		return json_decode( wp_json_encode( $data ), true );
+	}
+
+	protected function refused( $message ) {
+		return rest_ensure_response(
+			array(
+				'response' => array( 'status' => 200, 'message' => (string) $message ),
+				'items'    => array(),
+			)
+		);
+	}
+
+	protected function plain_text( $html ) {
+		$text = wp_strip_all_tags( str_replace( array( '</p>', '<br>', '<br/>', '<br />' ), "\n", (string) $html ) );
+		return trim( preg_replace( "/\n{3,}/", "\n\n", html_entity_decode( $text, ENT_QUOTES ) ) );
+	}
+
 	/**
 	 * The card's words. The catalog's DataSource sends them; these are
 	 * only what a request without them gets. `%d` is replaced rather than
@@ -377,6 +609,8 @@ class FluentCommunityCoursesController {
 			'lesson_many'      => __( '%d lessons', 'appza-core' ),
 			'student_one'      => __( '%d student', 'appza-core' ),
 			'student_many'     => __( '%d students', 'appza-core' ),
+			'course_one'       => __( '%d course', 'appza-core' ),
+			'course_many'      => __( '%d courses', 'appza-core' ),
 			'counts_separator' => '.',
 			'progress_format'  => __( '%d% COMPLETE', 'appza-core' ),
 			'paid_note'        => __( 'lifetime access. Enrollment opens on the web.', 'appza-core' ),
