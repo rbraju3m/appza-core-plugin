@@ -814,8 +814,13 @@ class PreviewProxyController {
 		// are the keys it orders on. `sort_time` is the epoch of the
 		// ORIGINAL created_at, which the relative-time pass above would
 		// otherwise have destroyed.
+		// A lesson's discussion (Courses chunk 6) is the same thread over
+		// the same route; its count is plural ("2 Replies" — the Courses
+		// doc's open item 9), where the post-detail designs write "Reply".
 		if ( 'fc-post-comments' === $ds_slug && is_array( $payload ) ) {
 			$payload = $this->thread_comments( $payload );
+		} elseif ( 'fc-lesson-comments' === $ds_slug && is_array( $payload ) ) {
+			$payload = $this->thread_comments( $payload, true );
 		}
 
 		// Feed links carry their icon in one of THREE fields — an emoji,
@@ -2189,7 +2194,7 @@ class PreviewProxyController {
 	 * @param array $rows
 	 * @return array
 	 */
-	protected function thread_comments( array $rows ) {
+	protected function thread_comments( array $rows, $plural = false ) {
 		$byId    = array();
 		$permalink = '';
 
@@ -2294,7 +2299,9 @@ class PreviewProxyController {
 			$parent['reply_count'] = count( $kids );
 			if ( $parent['reply_count'] > 0 ) {
 				/* translators: %d: how many replies a comment has. Singular "Reply" is deliberate — the designs write it that way at every count. */
-				$parent['reply_count_label'] = sprintf( __( '%d Reply', 'appza-core' ), $parent['reply_count'] );
+				$parent['reply_count_label'] = $plural
+					? sprintf( _n( '%d Reply', '%d Replies', (int) $parent['reply_count'], 'appza-core' ), $parent['reply_count'] )
+					: sprintf( __( '%d Reply', 'appza-core' ), $parent['reply_count'] );
 			}
 			// The order the sheet's "Most replied" row sorts on. Present on
 			// every parent, including the ones with none, so the comparison

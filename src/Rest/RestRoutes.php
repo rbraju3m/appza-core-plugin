@@ -733,6 +733,8 @@ class RestRoutes {
 					'course_slug'     => array( 'type' => 'string', 'required' => true ),
 					'lesson_slug'     => array( 'type' => 'string' ),
 					'position_format' => array( 'type' => 'string' ),
+					'discussion_format' => array( 'type' => 'string' ),
+					'discussion_none'   => array( 'type' => 'string' ),
 				),
 			)
 		);

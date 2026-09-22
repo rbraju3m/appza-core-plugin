@@ -573,7 +573,9 @@ class FluentCommunityCoursesController {
 	 * ------------------------------------------------------------- */
 
 	public function lesson( \WP_REST_Request $request ) {
-		$position_format = $this->word( $request, 'position_format', __( 'Lesson %1$d of %2$d', 'appza-core' ) );
+		$position_format   = $this->word( $request, 'position_format', __( 'Lesson %1$d of %2$d', 'appza-core' ) );
+		$discussion_format = $this->word( $request, 'discussion_format', __( 'Discussion(%d)', 'appza-core' ) );
+		$discussion_none   = $this->word( $request, 'discussion_none', __( 'Discussion', 'appza-core' ) );
 		$not_found       = __( 'Lesson not found. maybe the lesson is not published yet!', 'fluent-community' );
 
 		$read = $this->read_course( $request );
@@ -668,6 +670,12 @@ class FluentCommunityCoursesController {
 		}
 
 		$content = $can_view ? trim( wp_kses_post( (string) ( $lesson['content'] ?? '' ) ) ) : '';
+
+		$course_settings = isset( $course['settings'] ) && is_array( $course['settings'] ) ? $course['settings'] : array();
+		$comments_on     = $can_view
+			&& 'yes' !== ( $course_settings['disable_comments'] ?? '' )
+			&& 'yes' === ( $meta['enable_comments'] ?? '' );
+		$comments_count  = (int) ( $lesson['comments_count'] ?? 0 );
 		$done    = in_array( $id, $done_ids, true );
 
 		$row = array_merge(
@@ -706,6 +714,16 @@ class FluentCommunityCoursesController {
 				'cta_start'       => $can_view && ! $enrolled,
 				'cta_complete'    => $can_view && $enrolled && ! $done,
 				'cta_completed'   => $can_view && $enrolled && $done,
+				// The discussion (states 22–29). Open when the portal opens
+				// it: the course has not disabled comments, the viewer may
+				// see the lesson, and the lesson has Enable comments ON.
+				// Writing is for a student or the course admin (state 22);
+				// anyone else reads. "Discussion(N)" counts FC's comments_count,
+				// which includes replies (Noor).
+				'comments_enabled'   => $comments_on,
+				'comments_can_write' => $comments_on && ( $enrolled || ! empty( $course['is_course_admin'] ) ),
+				'comments_count'     => $comments_count,
+				'discussion_label'   => $comments_count > 0 ? str_replace( '%d', number_format_i18n( $comments_count ), $discussion_format ) : $discussion_none,
 			),
 			$this->quiz_fields( $lesson, (int) $course['id'], $can_view, $enrolled )
 		);
@@ -840,6 +858,10 @@ class FluentCommunityCoursesController {
 			'cta_start'       => false,
 			'cta_complete'    => false,
 			'cta_completed'   => false,
+			'comments_enabled'   => false,
+			'comments_can_write' => false,
+			'comments_count'     => 0,
+			'discussion_label'   => '',
 			'is_quiz'          => false,
 			'quiz_questions'   => array(),
 			'quiz_can_submit'  => false,
