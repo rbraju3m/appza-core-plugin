@@ -173,6 +173,9 @@ class BootstrapController {
 		if ( ! $this->bookmarks_enabled() ) {
 			$gated[] = 'bookmarks';
 		}
+		if ( ! $this->courses_enabled() ) {
+			array_push( $gated, 'courses', 'course-detail', 'course-students', 'course-lesson' );
+		}
 
 		if ( ! $gated ) {
 			return $catalog;
@@ -189,6 +192,19 @@ class BootstrapController {
 		);
 
 		return $catalog;
+	}
+
+	/**
+	 * Features -> "Courses / Learning Management". Every course screen
+	 * goes with it — the portal drops its Courses menu the same way, and
+	 * fcom-mobile's course routes answer nothing useful once it is off.
+	 */
+	protected function courses_enabled() {
+		if ( ! class_exists( '\\FluentCommunity\\App\\Services\\Helper' ) ) {
+			return false;
+		}
+
+		return (bool) \FluentCommunity\App\Services\Helper::isFeatureEnabled( 'course_module' );
 	}
 
 	/**
