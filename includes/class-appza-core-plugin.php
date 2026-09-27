@@ -165,6 +165,7 @@ class Appza_Core_Plugin {
 		$this->loader->add_action( 'rest_api_init', $fcMemberUpdate, 'register_hooks' );
 		$this->loader->add_action( 'rest_api_init', $fcMemberUsername, 'register_hooks' );
 		$this->loader->add_action( 'rest_api_init', $fcCourses, 'register_hooks' );
+		$this->loader->add_action( 'rest_api_init', new \AppzaCore\Plugin\Rest\FluentCommunityChatController(), 'register_hooks' );
 		$this->loader->add_action( 'rest_api_init', $previewCache, 'register_hooks' );
 		// Filter needs to be up whenever FC processes a feed write —
 		// which happens through rest_api_init for the mobile endpoint,

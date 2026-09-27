@@ -82,6 +82,53 @@ class FluentCommunityChatController {
 	 */
 	private const PENDING_SOURCE = 'chat_message_pending';
 
+	public function register_hooks() {
+		add_filter( 'rest_request_before_callbacks', array( $this, 'guard_fc_chat_media' ), 10, 3 );
+	}
+
+	/** FC attaches any media_key to a chat message; refuse keys the sender doesn't own, on FC's own route too. */
+	public function guard_fc_chat_media( $response, $handler, $request ) {
+		if ( is_wp_error( $response ) || ! $request instanceof \WP_REST_Request || 'POST' !== $request->get_method() ) {
+			return $response;
+		}
+		if ( ! preg_match( '#^/fluent-community/v2/chat/messages/\d+$#', (string) $request->get_route() ) ) {
+			return $response;
+		}
+		$items = $request->get_param( 'mediaItems' );
+		if ( is_array( $items ) && $this->has_unclaimable_media( $items, get_current_user_id() ) ) {
+			return new \WP_Error( 'appza_chat_media_not_yours', __( 'That attachment is not yours to send.', 'appza-core' ), array( 'status' => 403 ) );
+		}
+		return $response;
+	}
+
+	private function has_unclaimable_media( array $items, int $viewer ): bool {
+		if ( ! class_exists( '\FluentCommunity\App\Models\Media' ) ) {
+			return false;
+		}
+		foreach ( $items as $item ) {
+			if ( is_array( $item ) && 'giphy' === ( $item['provider'] ?? '' ) ) {
+				continue;
+			}
+			$url   = is_array( $item ) ? (string) ( $item['url'] ?? '' ) : (string) $item;
+			$query = (string) wp_parse_url( $url, PHP_URL_QUERY );
+			parse_str( $query, $args );
+			$key = isset( $args['media_key'] ) ? (string) $args['media_key'] : '';
+			if ( '' === $key ) {
+				continue;
+			}
+			$media = \FluentCommunity\App\Models\Media::where( 'media_key', $key )->first();
+			if ( ! $media ) {
+				continue;
+			}
+			$source    = (string) $media->object_source;
+			$unclaimed = self::PENDING_SOURCE === $source || ( '' === $source && empty( $media->feed_id ) );
+			if ( (int) $media->user_id !== $viewer || ! $unclaimed ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	public function permission_check() {
 		return is_user_logged_in();
 	}
@@ -257,6 +304,9 @@ class FluentCommunityChatController {
 		if ( '' === $text && ! $media ) {
 			return $this->error( 400, __( 'A message needs some text or an image.', 'appza-core' ) );
 		}
+		if ( $media && $this->has_unclaimable_media( $media, $viewer ) ) {
+			return $this->error( 403, __( 'That attachment is not yours to send.', 'appza-core' ) );
+		}
 
 		$payload = array( 'text' => $text );
 		if ( $media ) {
@@ -369,7 +419,7 @@ class FluentCommunityChatController {
 			return $this->error( $inner ?: 400, $this->upstream_message( $body, __( 'The message could not be deleted.', 'appza-core' ) ) );
 		}
 
-		$swept = $this->sweep_media( $urls, (int) $thread->id );
+		$swept = $this->sweep_media( $urls, (int) $thread->id, (int) $message->user_id );
 
 		return rest_ensure_response(
 			array(
@@ -415,7 +465,7 @@ class FluentCommunityChatController {
 	 *
 	 * @param array<int, string> $urls
 	 */
-	private function sweep_media( array $urls, int $thread_id ): int {
+	private function sweep_media( array $urls, int $thread_id, int $author_id ): int {
 		if ( ! $urls || ! class_exists( '\FluentCommunity\App\Models\Media' ) ) {
 			return 0;
 		}
@@ -429,6 +479,7 @@ class FluentCommunityChatController {
 			$rows = \FluentCommunity\App\Models\Media::where( 'object_source', 'chat_message' )
 				->where( 'feed_id', $thread_id )
 				->where( 'media_url', $url )
+				->where( 'user_id', $author_id )
 				->get();
 
 			foreach ( $rows as $row ) {
@@ -702,8 +753,13 @@ class FluentCommunityChatController {
 			return $this->error( 400, __( 'A community conversation cannot be deleted. Leave it instead.', 'appza-core' ) );
 		}
 
+		// Same rules as FC's deleteThread: DMs only, and a current participant.
+		if ( ! empty( $thread->provider ) && 'fcom' !== $thread->provider ) {
+			return $this->error( 400, __( 'A group conversation can only be deleted by its admin.', 'appza-core' ) );
+		}
 		$member = \FluentMessaging\App\Models\ThreadUser::where( 'thread_id', $thread->id )
 			->where( 'user_id', $viewer )
+			->whereIn( 'status', array( 'active', 'blocked' ) )
 			->first();
 
 		if ( ! $member ) {
