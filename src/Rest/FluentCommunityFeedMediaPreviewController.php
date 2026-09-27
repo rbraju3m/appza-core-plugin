@@ -38,7 +38,7 @@ class FluentCommunityFeedMediaPreviewController {
 	const USER_MODEL = '\\FluentCommunity\\App\\Models\\User';
 
 	public function permission_check() {
-		return is_user_logged_in();
+		return PortalGuard::member();
 	}
 
 	public function destroy( \WP_REST_Request $request ) {

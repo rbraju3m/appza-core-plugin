@@ -85,7 +85,7 @@ class FluentCommunityCoursesController {
 
 	/** Public read: FC lists public and private courses to a guest too. */
 	public function permission_check() {
-		return true;
+		return PortalGuard::reader();
 	}
 
 	/**

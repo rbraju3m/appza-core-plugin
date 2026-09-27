@@ -55,7 +55,7 @@ class FluentCommunityInvitationsController {
 	private const MANAGER_ROLES = array( 'admin', 'moderator' );
 
 	public function permission_check() {
-		return is_user_logged_in();
+		return PortalGuard::member();
 	}
 
 	/* ---------------------------------------------------------------

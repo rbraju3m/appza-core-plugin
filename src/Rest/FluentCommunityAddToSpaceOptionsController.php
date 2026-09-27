@@ -40,7 +40,7 @@ if ( ! defined( 'WPINC' ) ) {
 class FluentCommunityAddToSpaceOptionsController {
 
 	public function permission_check() {
-		return is_user_logged_in();
+		return PortalGuard::member();
 	}
 
 	public function handle( \WP_REST_Request $request ) {

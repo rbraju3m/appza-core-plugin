@@ -98,7 +98,7 @@ class FluentCommunityMembersDirectoryController {
 	 * setting decides, and it defaults to everybody.
 	 */
 	public function permission_check() {
-		return true;
+		return PortalGuard::reader();
 	}
 
 	/* ---------------------------------------------------------------

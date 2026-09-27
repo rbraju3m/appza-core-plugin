@@ -97,7 +97,7 @@ class FluentCommunityLeaderboardController {
 	 * viewer-specific gates itself below.
 	 */
 	public function permission_check() {
-		return true;
+		return PortalGuard::reader();
 	}
 
 	/* ---------------------------------------------------------------

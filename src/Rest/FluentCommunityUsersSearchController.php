@@ -32,7 +32,7 @@ if ( ! defined( 'WPINC' ) ) {
 class FluentCommunityUsersSearchController {
 
 	public function permission_check() {
-		return is_user_logged_in();
+		return PortalGuard::member();
 	}
 
 	public function handle( \WP_REST_Request $request ) {
@@ -45,24 +45,21 @@ class FluentCommunityUsersSearchController {
 			$per_page = 20;
 		}
 
-		$excluded_ids = array();
-		if ( $space_slug !== '' ) {
-			$space_id = (int) $wpdb->get_var(
-				$wpdb->prepare(
-					"SELECT id FROM {$wpdb->prefix}fcom_spaces WHERE slug = %s LIMIT 1",
-					$space_slug
-				)
-			);
-			if ( $space_id > 0 ) {
-				$rows = $wpdb->get_col(
-					$wpdb->prepare(
-						"SELECT user_id FROM {$wpdb->prefix}fcom_space_user WHERE space_id = %d AND status = 'active'",
-						$space_id
-					)
-				);
-				$excluded_ids = array_map( 'intval', $rows ?: array() );
-			}
+		// FC's own search (SpaceController::getOtherUsers): a space the viewer may add members to.
+		$space = '' !== $space_slug ? \FluentCommunity\App\Models\Space::where( 'slug', $space_slug )->first() : null;
+		$viewer = \FluentCommunity\App\Services\Helper::getCurrentUser();
+		if ( ! $space || ! $viewer || ! $space->verifyUserPermisson( $viewer, 'can_add_member', false ) ) {
+			return new \WP_Error( 'appza_users_search_forbidden', __( 'You are not allowed to add members to this space.', 'appza-core' ), array( 'status' => 403 ) );
 		}
+		$show_email = $viewer->isCommunityModerator() && current_user_can( 'list_users' );
+
+		$rows         = $wpdb->get_col(
+			$wpdb->prepare(
+				"SELECT user_id FROM {$wpdb->prefix}fcom_space_user WHERE space_id = %d AND status = 'active'",
+				(int) $space->id
+			)
+		);
+		$excluded_ids = array_map( 'intval', $rows ?: array() );
 
 		$args = array(
 			'number'         => $per_page,
@@ -70,7 +67,9 @@ class FluentCommunityUsersSearchController {
 			'order'          => 'ASC',
 			'fields'         => array( 'ID', 'display_name', 'user_email', 'user_login' ),
 			'exclude'        => $excluded_ids,
-			'search_columns' => array( 'user_login', 'user_email', 'display_name', 'user_nicename' ),
+			'search_columns' => $show_email
+				? array( 'user_login', 'user_email', 'display_name', 'user_nicename' )
+				: array( 'user_login', 'display_name', 'user_nicename' ),
 		);
 		if ( $search !== '' ) {
 			$args['search'] = '*' . str_replace( '*', '', $search ) . '*';
@@ -105,8 +104,8 @@ class FluentCommunityUsersSearchController {
 				'user_id'  => $uid,
 				'xprofile' => array(
 					'display_name' => $prof && $prof->display_name ? $prof->display_name : $user->display_name,
-					'email'        => $user->user_email,
-					'user_email'   => $user->user_email,
+					'email'        => $show_email ? $user->user_email : '',
+					'user_email'   => $show_email ? $user->user_email : '',
 					'user_nicename'=> $user->user_login,
 					'username'     => $prof->username ?? $user->user_login,
 					'avatar'       => $avatar,

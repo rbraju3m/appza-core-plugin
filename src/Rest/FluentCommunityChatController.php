@@ -130,7 +130,7 @@ class FluentCommunityChatController {
 	}
 
 	public function permission_check() {
-		return is_user_logged_in();
+		return PortalGuard::member();
 	}
 
 	/* ---------------------------------------------------------------
