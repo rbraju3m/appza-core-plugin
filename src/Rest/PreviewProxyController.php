@@ -74,7 +74,7 @@ class PreviewProxyController {
 		// simply expire unread. See bump_generation() below.
 		$generation = self::generation_for( $auth_bucket );
 		$cache_key  = 'appza_preview_' . $auth_bucket . '_' . $generation . '_'
-			. md5( $template_slug . '|' . $ds_slug . '|' . $params_json . '|' . $mode );
+			. md5( $template_slug . '|' . $ds_slug . '|' . self::canonical_params( $params_json ) . '|' . $mode );
 
 		// The catalog's own cache_ttl for this DataSource. 0 means "never
 		// cache" — fc-bookmarks declares it because the Saved Posts list
@@ -83,6 +83,10 @@ class PreviewProxyController {
 		// regardless of what it asked for, so a source that had declared
 		// itself uncacheable was cached for five minutes.
 		$cache_ttl = $this->resolve_cache_ttl( $template_slug, $ds_slug );
+		$endpoint  = 'demo' === $mode ? null : $this->resolve_endpoint( $template_slug, $ds_slug );
+		if ( null === $endpoint || strlen( $params_json ) > 1024 ) {
+			$cache_ttl = 0;
+		}
 
 		// `nocache=1` bypasses the transient read (still writes fresh result
 		// after fetch, so subsequent normal reads benefit). Used by
@@ -92,20 +96,18 @@ class PreviewProxyController {
 		if ( ! $nocache && $cache_ttl > 0 ) {
 			$cached = get_transient( $cache_key );
 			if ( false !== $cached ) {
-				return rest_ensure_response( $cached );
+				return rest_ensure_response( $this->rewrite_urls_for_current_host( $cached ) );
 			}
 		}
 
 		if ( 'demo' === $mode ) {
 			$payload = $this->fixture_for( $ds_slug );
 		} elseif ( 'real' === $mode ) {
-			$endpoint = $this->resolve_endpoint( $template_slug, $ds_slug );
 			$payload  = $endpoint ? $this->fetch_upstream( $endpoint, $params_json, $auth_header ) : null;
 			if ( ! is_array( $payload ) ) {
 				$payload = array();
 			}
 		} else {
-			$endpoint = $this->resolve_endpoint( $template_slug, $ds_slug );
 			$payload  = $endpoint ? $this->fetch_upstream( $endpoint, $params_json, $auth_header ) : null;
 			if ( ! is_array( $payload ) ) {
 				$payload = $this->fixture_for( $ds_slug );
@@ -840,11 +842,12 @@ class PreviewProxyController {
 			}
 		}
 
+		// Cached host-neutral; the request's host is applied per response.
 		if ( $cache_ttl > 0 ) {
 			set_transient( $cache_key, $payload, $cache_ttl );
 		}
 
-		return rest_ensure_response( $payload );
+		return rest_ensure_response( $this->rewrite_urls_for_current_host( $payload ) );
 	}
 
 	/**
@@ -1760,14 +1763,6 @@ class PreviewProxyController {
 				}
 			}
 		}
-		// Rewrite media URLs to point at the current request host.
-		// FluentCommunity stores absolute URLs at write time using WP's
-		// `siteurl` option (e.g. http://www.tutor-lms-mobile.local/...).
-		// On a mobile app hitting the site via a public tunnel or LAN IP,
-		// those stored URLs are unreachable from the client. Walk the
-		// response, string-replace stored siteurl with the incoming host
-		// + scheme so images resolve everywhere.
-		$items = $this->rewrite_urls_for_current_host( $items );
 		return $items;
 	}
 
@@ -1784,10 +1779,17 @@ class PreviewProxyController {
 		$scheme = ! empty( $_SERVER['HTTP_X_FORWARDED_PROTO'] )
 			? strtolower( (string) $_SERVER['HTTP_X_FORWARDED_PROTO'] )
 			: ( ( ! empty( $_SERVER['HTTPS'] ) && 'off' !== strtolower( $_SERVER['HTTPS'] ) ) ? 'https' : 'http' );
+		if ( 'http' !== $scheme && 'https' !== $scheme ) {
+			return $data;
+		}
 		$host = ! empty( $_SERVER['HTTP_X_FORWARDED_HOST'] )
 			? (string) $_SERVER['HTTP_X_FORWARDED_HOST']
 			: ( ! empty( $_SERVER['HTTP_HOST'] ) ? (string) $_SERVER['HTTP_HOST'] : $stored_host );
-		$target = $scheme . '://' . rtrim( $host, '/' );
+		$host = strtolower( rtrim( trim( $host ), '/' ) );
+		if ( ! $this->is_rewrite_host_allowed( $host, $stored_host ) ) {
+			return $data;
+		}
+		$target = $scheme . '://' . $host;
 
 		// Nothing to do if incoming request already came in on the stored URL.
 		if ( $target === $stored ) {
@@ -1798,6 +1800,53 @@ class PreviewProxyController {
 			'https://' . $stored_host,
 		);
 		return $this->walk_and_replace_urls( $data, $from_variants, $target );
+	}
+
+	/** The site's own host, or one listed in APPZA_REWRITE_HOSTS (comma list, `*.` wildcard). */
+	protected function is_rewrite_host_allowed( $host, $stored_host ) {
+		if ( '' === $host || ! preg_match( '/^[a-z0-9.-]+(:[0-9]{1,5})?$/', $host ) ) {
+			return false;
+		}
+		$home_host = preg_replace( '#^https?://#i', '', rtrim( (string) get_option( 'home', '' ), '/' ) );
+		if ( $host === strtolower( $stored_host ) || $host === strtolower( $home_host ) ) {
+			return true;
+		}
+		if ( ! defined( 'APPZA_REWRITE_HOSTS' ) ) {
+			return false;
+		}
+		foreach ( explode( ',', strtolower( (string) APPZA_REWRITE_HOSTS ) ) as $allowed ) {
+			$allowed = trim( $allowed );
+			if ( '' === $allowed ) {
+				continue;
+			}
+			if ( $host === $allowed ) {
+				return true;
+			}
+			if ( 0 === strpos( $allowed, '*.' ) && substr( $host, -strlen( $allowed ) + 1 ) === substr( $allowed, 1 ) ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** Params with keys sorted, so key order doesn't split the cache. */
+	protected static function canonical_params( $params_json ) {
+		$decoded = json_decode( (string) $params_json, true );
+		if ( ! is_array( $decoded ) ) {
+			return (string) $params_json;
+		}
+		$sort = function ( &$a ) use ( &$sort ) {
+			if ( array_keys( $a ) !== range( 0, count( $a ) - 1 ) ) {
+				ksort( $a );
+			}
+			foreach ( $a as &$v ) {
+				if ( is_array( $v ) ) {
+					$sort( $v );
+				}
+			}
+		};
+		$sort( $decoded );
+		return (string) wp_json_encode( $decoded );
 	}
 
 	protected function walk_and_replace_urls( $node, array $from_variants, $to ) {
