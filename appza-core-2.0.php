@@ -50,6 +50,11 @@ if ( ! defined( 'APPZA_CORE_AUTH_REST_NAMESPACE' ) ) {
 	define( 'APPZA_CORE_AUTH_REST_NAMESPACE', 'appza/auth/v1' );
 }
 
+// JWT login routes + Bearer middleware: unused (the app signs in via fcom-login), so off until adopted.
+if ( ! defined( 'APPZA_CORE_ENABLE_JWT_AUTH' ) ) {
+	define( 'APPZA_CORE_ENABLE_JWT_AUTH', false );
+}
+
 if ( ! defined( 'APPZA_CORE_CONTRACTS_VERSION' ) ) {
 	define( 'APPZA_CORE_CONTRACTS_VERSION', '2.0.0' );
 }

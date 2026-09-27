@@ -44,6 +44,9 @@ class Appza_Core_Plugin {
 	}
 
 	protected function register_auth_middleware() {
+		if ( ! APPZA_CORE_ENABLE_JWT_AUTH ) {
+			return;
+		}
 		( new AuthMiddleware() )->register();
 	}
 
@@ -155,7 +158,9 @@ class Appza_Core_Plugin {
 		// Same class as the /courses/catalog route; see its docblock.
 		$fcCourses = new FluentCommunityCoursesController();
 		$this->loader->add_action( 'rest_api_init', $rest, 'register_routes' );
-		$this->loader->add_action( 'rest_api_init', $auth, 'register_routes' );
+		if ( APPZA_CORE_ENABLE_JWT_AUTH ) {
+			$this->loader->add_action( 'rest_api_init', $auth, 'register_routes' );
+		}
 		$this->loader->add_action( 'rest_api_init', $fcFeedPerms, 'register_hooks' );
 		$this->loader->add_action( 'rest_api_init', $fcSpaceConfig, 'register_hooks' );
 		$this->loader->add_action( 'rest_api_init', $fcComposer, 'register_hooks' );
