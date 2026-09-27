@@ -1128,9 +1128,6 @@ class FluentCommunityChatController {
 		$headers = array( 'Content-Type' => 'application/json' );
 
 		$auth = $request->get_header( 'authorization' );
-		if ( ! is_string( $auth ) || '' === $auth ) {
-			$auth = $request->get_header( 'x_appza_auth' );
-		}
 		if ( is_string( $auth ) && '' !== $auth ) {
 			$headers['Authorization'] = $auth;
 		}

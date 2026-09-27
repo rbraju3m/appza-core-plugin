@@ -16,9 +16,7 @@
  * dataset keyed by data source slug is served so the preview still renders
  * realistic content.
  *
- * No auth at v1 (matches the bootstrap endpoint posture — admin-only access
- * is enforced by the React simulator's WP-admin context, and customer
- * mobile-app reads will gain JWT in Phase 1B.6).
+ * Viewer = get_current_user_id(): core-validated Authorization, else guest.
  */
 
 namespace AppzaCore\Plugin\Rest;
@@ -55,13 +53,18 @@ class PreviewProxyController {
 			return new \WP_Error( 'appza_preview_missing_ds', __( 'ds query parameter is required', 'appza-core' ), array( 'status' => 400 ) );
 		}
 
-		// Forward the browser's Authorization header (if any) to the upstream
-		// endpoint so user-scoped data sources (fc-current-user, feeds for
-		// the logged-in user, etc.) return the actual signed-in user's data
-		// instead of empty/anonymous responses. Cache key includes an auth
-		// hash so different users don't see each other's data.
+		// Stale clients still sending X-Appza-Auth get a 400, not silent guest data.
+		$viewer_id = get_current_user_id();
+		$legacy    = $request->get_header( 'x_appza_auth' );
+		if ( 0 === $viewer_id && is_string( $legacy ) && '' !== $legacy ) {
+			return new \WP_Error(
+				'appza_legacy_auth_header',
+				__( 'X-Appza-Auth is no longer accepted; send the application password as the Authorization header.', 'appza-core' ),
+				array( 'status' => 400 )
+			);
+		}
 		$auth_header = $this->extract_auth_header( $request );
-		$auth_bucket = $auth_header ? substr( md5( $auth_header ), 0, 12 ) : 'anon';
+		$auth_bucket = self::bucket_for_user( $viewer_id );
 
 		// The viewer's cache generation rides IN the key, so a write can
 		// invalidate every cached read this viewer holds by incrementing
@@ -109,7 +112,6 @@ class PreviewProxyController {
 			}
 		}
 
-		$viewer_id = $this->resolve_viewer_id( $auth_header );
 		$payload = $this->normalize_items( $payload, $viewer_id );
 
 		// fc-spaces-my is by-definition a "joined spaces" list, but the
@@ -873,23 +875,15 @@ class PreviewProxyController {
 		return self::CACHE_TTL;
 	}
 
-	/**
-	 * Bucket a request's credentials the same way the proxy does, so a
-	 * write arriving on a DIFFERENT route can address the cache the
-	 * reads populated.
-	 *
-	 * The app sends `X-Appza-Auth` on proxy reads and a plain
-	 * `Authorization` on direct fcom-mobile writes, but the VALUE is the
-	 * same credential string in both, which is what gets hashed.
-	 */
+	/** The viewer's cache bucket, so a write can invalidate the reads it affects. */
 	public static function auth_bucket_for( \WP_REST_Request $request ) {
-		$header = $request->get_header( 'x_appza_auth' );
-		if ( ! is_string( $header ) || '' === $header ) {
-			$header = $request->get_header( 'authorization' );
-		}
-		return ( is_string( $header ) && '' !== $header )
-			? substr( md5( $header ), 0, 12 )
-			: 'anon';
+		return self::bucket_for_user( get_current_user_id() );
+	}
+
+	/** Cache bucket for a verified user id: `u<ID>`, or `anon` for a guest. */
+	public static function bucket_for_user( $user_id ) {
+		$user_id = (int) $user_id;
+		return $user_id > 0 ? 'u' . $user_id : 'anon';
 	}
 
 	/** Current cache generation for a viewer bucket. */
@@ -911,19 +905,8 @@ class PreviewProxyController {
 		update_option( $option, self::generation_for( $auth_bucket ) + 1, false );
 	}
 
-	/**
-	 * Read the incoming Authorization header. Preference order:
-	 *   1. Explicit `X-Appza-Auth` header (set by the plug-in-admin so
-	 *      the browser can pass Basic Auth without the WP REST layer
-	 *      short-circuiting on the standard Authorization header).
-	 *   2. Standard `Authorization` header if present + non-empty.
-	 * Returns the raw header value (e.g. `Basic <base64>`) or null.
-	 */
+	/** Authorization header for the wp_remote_get path only; never decides the viewer. */
 	protected function extract_auth_header( \WP_REST_Request $request ) {
-		$appza = $request->get_header( 'x_appza_auth' );
-		if ( is_string( $appza ) && '' !== $appza ) {
-			return $appza;
-		}
 		$std = $request->get_header( 'authorization' );
 		if ( is_string( $std ) && '' !== $std ) {
 			return $std;
@@ -931,16 +914,6 @@ class PreviewProxyController {
 		return null;
 	}
 
-	/**
-	 * Decode the Basic Auth header we forwarded to the upstream + resolve
-	 * the WP user id from the username. Used to enrich feed items with the
-	 * viewer's own reaction state (like/bookmark) so the renderer can bind
-	 * icon + color per-item without a second round-trip.
-	 *
-	 * FC's feed listing eager-loads only `reactions.type = 'like'`, so
-	 * bookmark state never surfaces there — we query the reactions table
-	 * directly in normalize_items() using the id resolved here.
-	 */
 	/**
 	 * An age spelled out the way the About card's designs write it — "9
 	 * months", "10 minutes" — where relative_time() writes "9mo".
@@ -1430,23 +1403,6 @@ class PreviewProxyController {
 		return $tabs;
 	}
 
-	protected function resolve_viewer_id( $auth_header ) {
-		if ( ! is_string( $auth_header ) || 0 !== stripos( $auth_header, 'basic ' ) ) {
-			return 0;
-		}
-		$b64 = trim( substr( $auth_header, 6 ) );
-		$decoded = base64_decode( $b64, true );
-		if ( ! is_string( $decoded ) || strpos( $decoded, ':' ) === false ) {
-			return 0;
-		}
-		list( $username, ) = explode( ':', $decoded, 2 );
-		if ( '' === $username ) {
-			return 0;
-		}
-		$user = get_user_by( 'login', $username );
-		return $user ? (int) $user->ID : 0;
-	}
-
 	protected function resolve_endpoint( $template_slug, $ds_slug ) {
 		$snapshot = $this->snapshots->find_by_template_slug( $template_slug );
 		if ( ! $snapshot || ! is_array( $snapshot['snapshot_blob'] ) ) {
@@ -1472,31 +1428,9 @@ class PreviewProxyController {
 			}
 		}
 
-		// Upstream endpoints all live on this same WP install (fcom-mobile,
-		// appza-builder, tutor-lms-mobile). Prefer rest_do_request over
-		// wp_remote_get: it dispatches the callback in-process so the WP
-		// current-user context (cookie session from the WP-admin simulator)
-		// is preserved without having to forward cookies or invent an
-		// Authorization header. This is what lets fcom-mobile's transformer
-		// see the correct viewer via Helper::getCurrentUser() and attach a
-		// meaningful permissions bag — otherwise every menu row gated on
-		// data.permissions.* is hidden.
-		//
-		// Externally-called endpoints (mobile app with Basic Auth) still
-		// fall through wp_remote_get so the Authorization header round-trips
-		// correctly across the wire boundary.
+		// In-process dispatch inherits core's current user; no switching needed.
 		if ( '' !== $endpoint && '/' === $endpoint[0] && 0 === strpos( $endpoint, '/wp-json/' ) ) {
 			$route = substr( $endpoint, strlen( '/wp-json' ) );
-			// Resolve the viewer from the forwarded Basic Auth token BEFORE
-			// dispatching so the sub-request's Helper::getCurrentUser() sees
-			// the same user as the browser. WP core does not parse Basic
-			// Auth; without this step get_current_user_id() stays 0 and
-			// every permission (edit / delete / moderate) resolves to false.
-			$prev_user_id = get_current_user_id();
-			$sub_user_id  = $this->resolve_viewer_id( $auth_header );
-			if ( $sub_user_id > 0 && $sub_user_id !== $prev_user_id ) {
-				wp_set_current_user( $sub_user_id );
-			}
 			$rest_request = new \WP_REST_Request( 'GET', $route );
 			// Set as BOTH query params + generic params so downstream
 			// handlers can read via either get_query_params() or get_params().
@@ -1521,16 +1455,11 @@ class PreviewProxyController {
 				$_REQUEST[ $k ] = $scalar;
 				$_GET[ $k ]     = $scalar;
 			}
-			if ( is_string( $auth_header ) && '' !== $auth_header ) {
-				$rest_request->set_header( 'Authorization', $auth_header );
-			}
-			$response = rest_do_request( $rest_request );
-			// Restore superglobals + viewer so nothing downstream of this
-			// sub-request sees the forged state.
-			$_REQUEST = $prev_request_super;
-			$_GET     = $prev_get_super;
-			if ( $sub_user_id > 0 && $sub_user_id !== $prev_user_id ) {
-				wp_set_current_user( $prev_user_id );
+			try {
+				$response = rest_do_request( $rest_request );
+			} finally {
+				$_REQUEST = $prev_request_super;
+				$_GET     = $prev_get_super;
 			}
 			if ( $response->is_error() ) {
 				return null;
@@ -1558,8 +1487,6 @@ class PreviewProxyController {
 			'Accept'     => 'application/json',
 			'User-Agent' => 'APPZA-Preview-Proxy',
 		);
-		// Forward the caller's Basic Auth so user-scoped upstream endpoints
-		// (fc-current-user etc.) return the actual signed-in user's data.
 		if ( is_string( $auth_header ) && '' !== $auth_header ) {
 			$headers['Authorization'] = $auth_header;
 		}
@@ -2439,16 +2366,9 @@ class PreviewProxyController {
 			return $none;
 		}
 
-		// The viewer is set only DURING the upstream sub-request —
-		// fetch_upstream restores the previous user before returning — so by
-		// the time this normalisation runs, get_current_user_id() is 0 again
-		// and every FC helper that reads the current user answers for a
-		// guest. Both of these do. Set the viewer for the length of the
-		// check and put it back, exactly as the sub-request does.
-		$prev_user_id = get_current_user_id();
-		$switched     = ( $viewer_id > 0 && $viewer_id !== $prev_user_id );
-		if ( $switched ) {
-			wp_set_current_user( $viewer_id );
+		// FC's helpers read the current user, so only answer for the viewer.
+		if ( (int) $viewer_id !== get_current_user_id() ) {
+			return $none;
 		}
 
 		$roles = array( 'is_moderator' => false, 'is_admin' => false );
@@ -2463,10 +2383,6 @@ class PreviewProxyController {
 			$roles['is_admin'] = (bool) \FluentCommunity\App\Services\Helper::isSiteAdmin( $viewer_id ?: null );
 		}
 		$roles['is_moderator'] = (bool) \FluentCommunity\App\Services\Helper::isModerator();
-
-		if ( $switched ) {
-			wp_set_current_user( $prev_user_id );
-		}
 
 		return $roles;
 	}
