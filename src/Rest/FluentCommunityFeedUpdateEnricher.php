@@ -74,7 +74,7 @@ class FluentCommunityFeedUpdateEnricher {
 		if ( ! $request instanceof \WP_REST_Request ) {
 			return $result;
 		}
-		if ( (string) $request->get_route() !== self::ROUTE ) {
+		if ( (string) $request->get_route() !== self::ROUTE || ! is_user_logged_in() ) {
 			return $result;
 		}
 		$params = $request->get_json_params();
@@ -135,7 +135,7 @@ class FluentCommunityFeedUpdateEnricher {
 		}
 		$paths = isset( $this->pendingByFeedId[ $feedId ] ) ? $this->pendingByFeedId[ $feedId ] : [];
 		unset( $this->pendingByFeedId[ $feedId ] );
-		if ( empty( $paths ) ) {
+		if ( empty( $paths ) || ! $this->fc_accepted_edit( $response, $feedId ) ) {
 			return $response;
 		}
 
@@ -201,6 +201,19 @@ class FluentCommunityFeedUpdateEnricher {
 		}
 
 		return $response;
+	}
+
+	/** WordPress runs this hook even for refused requests, so write only when FC accepted the edit. */
+	protected function fc_accepted_edit( $response, $feedId ) {
+		if ( ! $response instanceof \WP_REST_Response || $response->get_status() < 200 || $response->get_status() >= 300 ) {
+			return false;
+		}
+		if ( ! is_user_logged_in() || ! class_exists( '\\FluentCommunity\\App\\Services\\Helper' ) ) {
+			return false;
+		}
+		$feed = \FluentCommunity\App\Models\Feed::find( $feedId );
+		$user = \FluentCommunity\App\Services\Helper::getCurrentUser();
+		return $feed && $user && $user->canEditFeed( $feed );
 	}
 
 	/**
