@@ -1,9 +1,5 @@
 <?php
-/**
- * Runs on plug-in deactivation. Intentionally minimal — uninstall.php handles
- * destructive teardown (drop tables, delete options). Deactivation should be
- * non-destructive so a customer can re-activate without data loss.
- */
+/** Non-destructive by design; uninstall.php drops data. */
 
 if ( ! defined( 'WPINC' ) ) {
 	die;

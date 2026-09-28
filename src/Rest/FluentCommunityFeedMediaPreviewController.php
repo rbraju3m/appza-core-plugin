@@ -2,28 +2,8 @@
 /**
  * POST /wp-json/fcom-mobile/api/v1/feeds/remove-preview
  *
- * "Remove Preview" from the post 3-dot menu (Noor's design 22).
- *
- * FluentCommunity has this as `DELETE feeds/{id}/media-preview`, but
- * that route lives in FC's OWN namespace behind its own router and is
- * not reachable from ours, and fcom-mobile ships nothing equivalent. So
- * the route is added to the fcom-mobile namespace from here — the same
- * P68 reasoning as /users/search and /spaces/invitations: WordPress does
- * not gate register_rest_route by which plugin owns a namespace, and
- * fcom-mobile is third-party and must stay unmodified.
- *
- * POST rather than DELETE, matching every other fcom-mobile mutation the
- * catalog wires (add-member, remove-member, invitations/delete), so the
- * renderer's HTTP action needs no special case for the verb.
- *
- * The guard is FluentCommunity's own. `FeedsController::deleteMediaPreview`
- * calls `User::canDeleteFeed($feed, true)` — whoever may delete the post
- * may strip its preview — and that same call is made here rather than
- * reasoned about, so the app can never offer a row the API will refuse.
- * The effect is two lines against the same model; calling FC's controller
- * directly would mean constructing its framework Request object.
- *
- * ⚠ There is no undo. FC nulls the meta key and the preview is gone.
+ * FC's own DELETE feeds/{id}/media-preview is unreachable from WP REST. Guarded by FC's
+ * canDeleteFeed, exactly as its deleteMediaPreview does. No undo.
  */
 
 namespace AppzaCore\Plugin\Rest;
@@ -77,9 +57,7 @@ class FluentCommunityFeedMediaPreviewController {
 			);
 		}
 
-		// FluentCommunity's own rule, called rather than replicated. The
-		// `true` argument is what makes it THROW on refusal instead of
-		// returning false — the same call deleteMediaPreview() makes.
+		// `true` makes it throw on refusal instead of returning false.
 		try {
 			$user->canDeleteFeed( $feed, true );
 		} catch ( \Throwable $e ) {
@@ -92,10 +70,7 @@ class FluentCommunityFeedMediaPreviewController {
 
 		$meta = (array) $feed->meta;
 		if ( empty( $meta['media_preview'] ) ) {
-			// Already gone. Reported as success rather than 404: the menu
-			// row is gated on the preview existing, so arriving here means
-			// two taps raced or a stale card was tapped, and neither is an
-			// error the person can act on.
+			// Success, not 404: only a race or stale card gets here.
 			return array(
 				'response' => array(
 					'status'  => 200,

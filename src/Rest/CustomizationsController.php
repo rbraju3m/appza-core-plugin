@@ -1,22 +1,4 @@
 <?php
-/**
- * REST CRUD for wp_appza_customizations.
- *
- * Endpoints (all under appza/v1):
- *   POST   /customizations               — upsert one row (composite-key matched)
- *   DELETE /customizations/(?P<id>\d+)   — remove one row by primary key
- *
- * Auth: every route requires `manage_options` + a valid X-WP-Nonce header
- * (the React app gets the nonce + URLs localized via window.appzaCoreConfig).
- * Same gate as the legacy admin-post pull form — overrides are a customer-
- * privilege operation.
- *
- * GET-ing the current overrides is intentionally NOT a separate endpoint;
- * the bootstrap envelope already carries the full nested tree, so the
- * React app reads them from there and refetches the envelope after a
- * mutate. Avoids a parallel source of truth.
- */
-
 namespace AppzaCore\Plugin\Rest;
 
 use AppzaCore\Plugin\Repository\CustomizationRepository;
@@ -83,7 +65,6 @@ class CustomizationsController {
 			);
 		}
 
-		// scope=global allows null target_slug; every other scope requires one.
 		if ( 'global' !== $scope && ( ! is_string( $target_slug ) || '' === $target_slug ) ) {
 			return new \WP_Error(
 				'appza_customizations_missing_target',
@@ -92,7 +73,6 @@ class CustomizationsController {
 			);
 		}
 
-		// Compose normalised values for the repo (NULL not "" for empty slugs).
 		$target_slug           = ( is_string( $target_slug ) && '' !== $target_slug ) ? $target_slug : null;
 		$target_slug_composite = ( is_string( $target_slug_composite ) && '' !== $target_slug_composite ) ? $target_slug_composite : null;
 

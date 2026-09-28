@@ -1,8 +1,4 @@
 <?php
-/**
- * Loads the plug-in's text domain for translations.
- */
-
 if ( ! defined( 'WPINC' ) ) {
 	die;
 }

@@ -1,15 +1,6 @@
 <?php
 /**
  * POST /wp-json/appza/v1/sync-from-core
- *
- * The React simulator's "Sync" button calls this to trigger a fresh
- * snapshot pull from the Laravel core — same effect as the legacy
- * "Pull from Core" admin-post form on the Sync page, without the
- * navigate-away round trip.
- *
- * Auth: manage_options + X-WP-Nonce (mirrors CustomizationsController).
- * On success returns `{ template_slug, catalog_snapshot_version,
- * core_api_version, pulled_at }` so the client can render a toast.
  */
 
 namespace AppzaCore\Plugin\Rest;

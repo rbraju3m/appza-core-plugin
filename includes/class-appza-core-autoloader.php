@@ -1,18 +1,5 @@
 <?php
-/**
- * Autoloader for APPZA Core plug-in classes.
- *
- * Handles two class-naming conventions:
- *
- *   1. PSR-4 namespaced classes under `AppzaCore\Plugin\` → loaded from `src/`.
- *      Used by the modern code surface (REST controllers, services, repositories).
- *
- *   2. Legacy underscore class names `Appza_Core_*` → loaded from `includes/`.
- *      Used by the WP-Plugin-Boilerplate-style orchestrator + activation classes.
- *
- * Composer's autoloader is preferred when vendor/autoload.php is present (see main
- * plug-in file). This fallback keeps the plug-in runnable without a composer install.
- */
+/** Fallback when vendor/autoload.php is absent: AppzaCore\Plugin\* from src/, Appza_Core_* from includes/. */
 
 if ( ! defined( 'WPINC' ) ) {
 	die;

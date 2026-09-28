@@ -1,48 +1,8 @@
 <?php
 /**
- * Attaches the create-post composer's PER-VIEWER verdicts to the
- * fcom-mobile space-picker responses.
- *
- * The site-wide half of the composer's configuration (title pref, media
- * cap, rich-media layout, FluentPlayer switches) rides the bootstrap
- * envelope as `runtime_config.fluent_community.composer`. It is cached
- * per template and public-read, so anything that depends on WHO is
- * asking cannot be answered there — it would be whoever warmed the
- * cache. That is the same split the leaderboard and bookmarks visibility
- * settings already use (D64).
- *
- * This is the other half. Two things are per-viewer:
- *
- *   1. Whether the schedule + "Send announcement email" controls exist
- *      at all. FluentCommunity gates the announcement mail on
- *      `hasPermissionOrInCurrentSpace('community_moderator', $space)`
- *      (FeedsController::create, line ~346) — a GLOBAL moderator, or a
- *      moderator of the space being posted to. Both halves ship: the
- *      global verdict on `viewer`, the per-space one on each row, so the
- *      composer can re-evaluate when the space changes without a
- *      second request.
- *
- *   2. Whether the attachment glyph exists. That is the space's own
- *      Document Library switch plus its "who can upload" setting, which
- *      FluentCommunity resolves into `can_view_documents` /
- *      `can_upload_documents` on the same permissions bag.
- *
- * Why an enricher rather than a route of our own: fcom-mobile's
- * `/spaces/create-post-information-lean` already computes and then
- * DROPS these keys — it copies only `can_create_post` out of a
- * permissions bag that FluentCommunity filled in completely. Editing
- * fcom-mobile is out (third-party source plugin), and a parallel route
- * would fetch the same space list twice. So we re-derive the dropped
- * keys here, from FluentCommunity's own models, on the response the
- * composer is already fetching.
- *
- * Cost: one `whereIn(slug)` query plus FluentCommunity's own membership
- * preload, once per composer open.
- *
- * Hooks on `rest_request_after_callbacks` for the same reason
- * FluentCommunitySpaceConfigEnricher does — it fires for the outer
- * serve_request AND for the internal rest_do_request calls the WP-admin
- * simulator makes through PreviewProxyController.
+ * Adds per-viewer composer verdicts to fcom-mobile's space-picker responses.
+ * The lean route computes then DROPS these permission keys, so they are re-derived here;
+ * they cannot live in the bootstrap envelope, which is cached per template, not per viewer.
  */
 
 namespace AppzaCore\Plugin\Rest;
@@ -53,10 +13,6 @@ if ( ! defined( 'WPINC' ) ) {
 
 class FluentCommunityComposerEnricher {
 
-	/**
-	 * Both variants of the space picker. The composer uses the lean one;
-	 * the full one is enriched too so the two never disagree.
-	 */
 	const ROUTES = array(
 		'/fcom-mobile/api/v1/spaces/create-post-information-lean',
 		'/fcom-mobile/api/v1/spaces/create-post-information',
@@ -68,8 +24,6 @@ class FluentCommunityComposerEnricher {
 
 	/**
 	 * @param \WP_REST_Response|\WP_HTTP_Response|\WP_Error|mixed $response
-	 * @param array                                              $handler
-	 * @param \WP_REST_Request                                   $request
 	 */
 	public function attach_composer_context( $response, $handler, $request ) {
 		if ( ! $response instanceof \WP_REST_Response ) {
@@ -89,20 +43,8 @@ class FluentCommunityComposerEnricher {
 
 		$user = \FluentCommunity\App\Services\Helper::getCurrentUser();
 
-		// items is [ {spaces: [ {group_name, spaces: []}, … ]} ] — a
-		// one-element list whose single member is the wrapper object.
-		// Adding a second key to that object is safe: the renderer only
-		// unwraps single-key objects that arrive as `items` ITSELF, never
-		// elements of an items ARRAY.
-		//
-		// A viewer with no spaces gets `items: []` upstream. This is not
-		// a list of rows — the picker's rows live at items[0].spaces — so
-		// the wrapper is synthesised rather than left off. Otherwise the
-		// composer would lose its viewer verdict (no schedule control, no
-		// announcement checkbox, no "On my profile" row) for exactly the
-		// members most likely to be posting to their profile. `spaces`
-		// stays the empty list it was, so the picker's own empty state is
-		// untouched (P93).
+		// items is [ {spaces: [...]} ]. A viewer with no spaces gets items: [] upstream; synthesise the
+		// wrapper so the viewer verdict (schedule, announcement, "On my profile") still arrives.
 		$items = is_array( $data['items'] ) ? array_values( $data['items'] ) : array();
 		if ( ! $items ) {
 			$items = array( array( 'spaces' => array() ) );
@@ -168,18 +110,7 @@ class FluentCommunityComposerEnricher {
 	}
 
 	/**
-	 * The topic chips the composer draws once this space is picked.
-	 *
-	 * Costs nothing per space: FluentCommunity's `Utility::getTopics()`
-	 * is a single cached query for EVERY topic on the site, and
-	 * `getTopicsBySpaceId()` filters that in memory. So attaching them to
-	 * every row is cheaper than fetching the space's detail after each
-	 * selection, which is what the composer would otherwise have to do —
-	 * once per space the user tries.
-	 *
-	 * `admin_only` topics are dropped for anyone who is not a moderator.
-	 * FluentCommunity flags them on the topic itself, and a chip a member
-	 * cannot post under should not be offered.
+	 * Cheap per row: FC's getTopicsBySpaceId() filters one cached all-topics query in memory.
 	 *
 	 * @param object|null $space
 	 * @return array<int, array<string, mixed>>
@@ -211,9 +142,6 @@ class FluentCommunityComposerEnricher {
 	}
 
 	/**
-	 * The space's own "topic required" switch, which decides whether the
-	 * composer may post without a chip selected.
-	 *
 	 * @param object|null $space
 	 */
 	protected function topic_required( $space ) {
@@ -226,9 +154,7 @@ class FluentCommunityComposerEnricher {
 	}
 
 	/**
-	 * One query for every space in the picker, with FluentCommunity's own
-	 * membership preload so `getSpacePermissions()` does not fire a
-	 * lookup per row.
+	 * Preloads memberships so getSpacePermissions() does not query per row.
 	 *
 	 * @param array<int, string> $slugs
 	 * @param object|false       $user
@@ -254,11 +180,7 @@ class FluentCommunityComposerEnricher {
 	}
 
 	/**
-	 * The keys fcom-mobile's lean transform drops, re-derived.
-	 *
-	 * `can_create_post` is left exactly as it arrived — the lean endpoint
-	 * already carries it and re-deriving would risk disagreeing with the
-	 * value the picker is already gating rows on.
+	 * `can_create_post` is kept as it arrived so it cannot disagree with the picker's own gating.
 	 *
 	 * @param array<string, mixed> $existing
 	 * @param object|null          $space
@@ -269,10 +191,7 @@ class FluentCommunityComposerEnricher {
 		$existing['can_create_post'] = ! empty( $existing['can_create_post'] );
 
 		$defaults = array(
-			// The announcement checkbox and the schedule control.
 			'community_moderator'  => false,
-			// The attachment glyph: the space's Document Library switch,
-			// then its "who can upload" setting.
 			'can_view_documents'   => false,
 			'can_upload_documents' => false,
 		);
@@ -293,10 +212,6 @@ class FluentCommunityComposerEnricher {
 	}
 
 	/**
-	 * The verdicts that are about the viewer alone, with no space in
-	 * hand — what the composer needs before a space is picked, and what
-	 * "On my profile" is governed by.
-	 *
 	 * @param object|false $user
 	 * @return array<string, mixed>
 	 */
@@ -309,10 +224,6 @@ class FluentCommunityComposerEnricher {
 		return array(
 			'is_authenticated'    => (bool) $user,
 			'is_site_admin'       => $is_site_admin,
-			// Global community moderator. The composer shows the schedule
-			// and announcement controls on this; picking a space the
-			// viewer moderates widens it via the row's own
-			// `community_moderator`.
 			'is_moderator'        => $is_moderator || $is_site_admin,
 			'can_upload_video'    => $this->can_upload_media( $is_site_admin, $is_moderator ),
 			'can_upload_audio'    => $this->can_upload_media( $is_site_admin, $is_moderator )
@@ -320,13 +231,7 @@ class FluentCommunityComposerEnricher {
 		);
 	}
 
-	/**
-	 * FluentPlayer's upload gate, read exactly the way its own
-	 * MediaController@uploadVideo reads it: the plugin active, the
-	 * `video_upload` switch on, then `video_upload_role` — `admin`,
-	 * `admin_moderator` or `everyone`. Audio rides the same gate plus
-	 * `enable_audio`, which is also how the controller enforces it.
-	 */
+	// Mirrors FluentPlayer's MediaController@uploadVideo gate.
 	protected function can_upload_media( $is_site_admin, $is_moderator ) {
 		$bootstrap = '\\FluentCommunity\\Modules\\Integrations\\FluentPlayer\\Bootstrap';
 		if ( ! class_exists( $bootstrap ) ) {

@@ -1,12 +1,4 @@
 <?php
-/**
- * Read / upsert for wp_appza_customizations.
- *
- * Bootstrap endpoint calls all_as_tree() to fold the flat table into the
- * nested wire shape the renderer expects (scope -> target_key -> column).
- * Admin override editor (Phase 1B.5b) will call upsert() per form submit.
- */
-
 namespace AppzaCore\Plugin\Repository;
 
 use AppzaCore\Plugin\Schema\CustomizationSchema;
@@ -31,16 +23,8 @@ class CustomizationRepository {
 	}
 
 	/**
-	 * Returns nested {scope: {target_key: {column: value}}}.
-	 *
-	 * `target_key` is the target_slug for single-target scopes
-	 * (appzet / template / etc.), the target_slug_composite for the
-	 * placement scope, and the empty string for global scope (no target).
-	 *
-	 * Every value is stored as JSON in the DB; we decode without $assoc=true
-	 * so stored object shapes are preserved (avoids the empty-{}-becomes-[]
-	 * trap that bit catalog.template.tokens — see bugs_fixed memory entry
-	 * for that family of issues).
+	 * Returns {scope: {target_key: {column: value}}}. Decoded as objects so an empty {}
+	 * doesn't come back as [].
 	 */
 	public function all_as_tree() {
 		$rows = $this->all();
@@ -50,8 +34,6 @@ class CustomizationRepository {
 			$column = (string) $row['target_column'];
 			$key    = $this->target_key_for( $row );
 			$value  = json_decode( (string) $row['override_value'], false );
-			// Normalize empty PHP arrays back to stdClass so they encode
-			// as JSON objects (matches the leaf-bag wire contract).
 			if ( is_array( $value ) && empty( $value ) ) {
 				$value = new \stdClass();
 			}
@@ -63,8 +45,6 @@ class CustomizationRepository {
 			}
 			$tree[ $scope ][ $key ][ $column ] = $value;
 		}
-		// Cast each leaf bucket to stdClass so empty inner objects survive.
-		// (We start with arrays for easy assignment; finalize as objects.)
 		foreach ( $tree as $scope => $by_target ) {
 			foreach ( $by_target as $target_key => $columns ) {
 				$tree[ $scope ][ $target_key ] = (object) $columns;
@@ -119,12 +99,7 @@ class CustomizationRepository {
 		global $wpdb;
 		$table = CustomizationSchema::table_name();
 
-		// wpdb->prepare() coerces PHP null through %s to '' (or 'null'
-		// depending on WP version) rather than preserving SQL NULL, so
-		// `<=> %s` degenerates to `<=> ''` and never matches real NULL
-		// rows. Branch to `IS NULL` when the value is null; use `= %s`
-		// otherwise. Same treatment for target_slug (nullable for global
-		// scope) and target_slug_composite (nullable for non-placement).
+		// prepare() turns null into '' rather than SQL NULL, so null columns need IS NULL.
 		$where   = array( 'scope = %s' );
 		$prepare = array( $scope );
 
@@ -167,10 +142,6 @@ class CustomizationRepository {
 		if ( 'global' === $scope ) {
 			return '';
 		}
-		// Composite-keyed scopes: the tree key is the self-contained composite
-		// so lookups by (scope, key) are unambiguous. template_screen_placement
-		// composites are `<ts.slug>#<placement_key>`; appzet_primitive composites
-		// are `<appzet.slug>#children[<i>]`.
 		if ( 'template_screen_placement' === $scope || 'appzet_primitive' === $scope ) {
 			return (string) ( $row['target_slug_composite'] ?? '' );
 		}

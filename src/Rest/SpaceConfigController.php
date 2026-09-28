@@ -1,16 +1,4 @@
 <?php
-/**
- * REST endpoints for the per-space runtime config editor.
- *
- *   GET  /wp-json/appza/v1/space-config           → list of spaces + their configs
- *   GET  /wp-json/appza/v1/space-config/<slug>    → single config
- *   POST /wp-json/appza/v1/space-config/<slug>    → upsert; body = JSON config
- *
- * All require `manage_options` — this is a site admin surface, not
- * consumed by the mobile client. The mobile app reads configs through
- * the fcom-mobile enricher which attaches them onto the space payload.
- */
-
 namespace AppzaCore\Plugin\Rest;
 
 use AppzaCore\Plugin\Repository\SpaceConfigRepository;
@@ -57,9 +45,6 @@ class SpaceConfigController {
 		if ( ! is_array( $body ) ) {
 			return new \WP_Error( 'appza_bad_body', 'Body must be a JSON object.', array( 'status' => 400 ) );
 		}
-		// The 'config' key wraps the payload so callers can send auxiliary
-		// metadata later without conflating; if it's missing, treat the
-		// whole body AS the config for a simpler write.
 		$config = isset( $body['config'] ) && is_array( $body['config'] ) ? $body['config'] : $body;
 		$config = $this->sanitize_config( $config );
 		$ok     = $this->repo->upsert( $slug, $config );
@@ -75,12 +60,6 @@ class SpaceConfigController {
 		);
 	}
 
-	/**
-	 * Shallow sanitization — allow only the documented top-level keys
-	 * (switcher / subtabs / topics / cover), each pre-defined value
-	 * shapes. Anything else is dropped. Prevents random keys from
-	 * making it into config_json and bloating snapshots.
-	 */
 	protected function sanitize_config( array $in ): array {
 		$out = array();
 		foreach ( array( 'switcher', 'topics', 'cover' ) as $key ) {
@@ -111,11 +90,6 @@ class SpaceConfigController {
 		return $out;
 	}
 
-	/**
-	 * Recursively clean scalars: strings via sanitize_text_field,
-	 * bools/numbers left as-is, arrays walked, nested objects preserved.
-	 * Keeps _style bags intact (they're just string→string maps).
-	 */
 	protected function clean_object( array $in ): array {
 		$out = array();
 		foreach ( $in as $k => $v ) {

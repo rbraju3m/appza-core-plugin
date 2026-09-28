@@ -1,9 +1,4 @@
 <?php
-/**
- * DDL for wp_appza_catalog_snapshot per appza-implementation-plan.md § 4.12.3
- * (DC#13 Q5 — cached Core catalog subset, one row per Template).
- */
-
 namespace AppzaCore\Plugin\Schema;
 
 if ( ! defined( 'WPINC' ) ) {

@@ -1,24 +1,4 @@
 <?php
-/**
- * HTTP client to the APPZA Core SaaS catalog-export endpoint.
- *
- * Base URL comes from CoreUrl (wp-config constant, then the Sync-page
- * setting). The Core-side endpoint is `GET /catalog/snapshot
- * ?template=<slug>` and is expected to return:
- *
- *   {
- *     catalog_snapshot_version: <bigint>,
- *     core_api_version:        "<semver>",
- *     snapshot: { template, superstructures[], appzets[], data_sources[],
- *                 actions[], primitives[], primitive_props[], app_map,
- *                 source_integration }
- *   }
- *
- * The Core-side endpoint is NOT yet implemented (Phase 1B-Core mirror).
- * Until it ships, calls return a WP_Error and the admin dashboard surfaces
- * the failure to the operator without silently faking success.
- */
-
 namespace AppzaCore\Plugin\Services;
 
 if ( ! defined( 'WPINC' ) ) {
@@ -50,12 +30,7 @@ class CoreClient {
 		return $data;
 	}
 
-	/**
-	 * Fetches Templates from the Core. When $slugs is a non-empty array,
-	 * the Core filters to Templates whose Source Integration slug is in
-	 * that list. Pass an empty array explicitly to signal "no integrations
-	 * picked → return nothing"; pass null to omit the filter (all active).
-	 */
+	/** $slugs: null = no filter; an empty array = no integrations picked, returns nothing. */
 	public function fetch_templates( $slugs = null ) {
 		$url = $this->url( 'catalog/templates' );
 		if ( is_wp_error( $url ) ) {
@@ -80,11 +55,6 @@ class CoreClient {
 		return $data;
 	}
 
-	/**
-	 * Fetches the active Source Integrations list from the Core.
-	 * Returns the decoded envelope `{ core_api_version, source_integrations[] }`
-	 * or a WP_Error on transport/shape failure.
-	 */
 	public function fetch_source_integrations() {
 		$url = $this->url( 'catalog/source-integrations' );
 		if ( is_wp_error( $url ) ) {

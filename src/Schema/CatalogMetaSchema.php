@@ -1,16 +1,5 @@
 <?php
-/**
- * DDL for wp_appza_catalog_meta per appza-implementation-plan.md § 4.14.
- * Single-row version registry consumed by the bootstrap endpoint.
- *
- * Bumped on:
- *   - customer customizations edit       → customizations_version
- *   - WP plug-in catalog refresh         → catalog_snapshot_version
- *   - Lazycoders ship (contracts change) → schema_version
- *
- * `id = 1` is a hardcoded singleton row; the table is constrained but trivially
- * extensible to multi-row if a per-tenant break-out is ever needed.
- */
+/** Single-row (id = 1) version registry read by the bootstrap endpoint. */
 
 namespace AppzaCore\Plugin\Schema;
 

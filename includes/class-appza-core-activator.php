@@ -1,9 +1,4 @@
 <?php
-/**
- * Runs on plug-in activation. Seeds option markers and installs the plug-in's
- * tables via the SchemaManager.
- */
-
 if ( ! defined( 'WPINC' ) ) {
 	die;
 }
@@ -14,12 +9,7 @@ class Appza_Core_Activator {
 
 	const CRON_PURGE_REFRESH_TOKENS = 'appza_core_purge_refresh_tokens';
 
-	/**
-	 * Sweeps chat images that were uploaded and then never sent.
-	 * FluentCommunity creates the Media row at upload time, so a
-	 * composer abandoned before send — or an app killed mid-compose —
-	 * leaves a row and a file that nothing will ever reference.
-	 */
+	// FC creates the Media row at upload, so an unsent chat image leaves an orphan row and file.
 	const CRON_SWEEP_CHAT_MEDIA = 'appza_core_sweep_chat_media';
 
 	public static function activate() {

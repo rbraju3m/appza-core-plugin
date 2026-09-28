@@ -1,37 +1,7 @@
 <?php
 /**
- * Space documents — the DOCUMENTS sub-tab on space-detail.
- *
- *   GET /wp-json/fcom-mobile/api/v1/spaces/documents
- *
- * Registered under the fcom-mobile namespace from our plugin, same as
- * the invitations + users-search controllers (P68). fcom-mobile does
- * ship `/documents`, but it proxies FluentCommunity Pro's route
- * verbatim and that is not usable from the catalog as-is:
- *
- *   1. It demands a numeric `space_id`. Everything on the mobile side
- *      addresses spaces by slug — the space-detail screen only ever
- *      knows `space_slug`.
- *   2. It returns raw document *feeds*, whose `meta.document_lists` is
- *      a snapshot frozen when the feed was created. The filename is
- *      not really in there: each entry carries `title`, which is
- *      `settings.title ?? settings.original_name ?? basename(url)`
- *      resolved AT CREATION TIME. Rename a file afterwards through
- *      /documents/update and the snapshot still shows the old name —
- *      and the design puts that filename front and centre.
- *
- * So we re-derive the file list from the live Media rows the way
- * FeedsHelper already does for `document_ids`, and compose the two
- * display strings the card needs server-side (P71) — "Uploaded 2
- * files" and "8 days ago by Nusrat Jahan" — because both are
- * conditional and have to stay identical to the web portal.
- *
- * A "document" is a Feed with content_type='document'; its files are
- * Media rows with object_source='space_document' and feed_id set.
- * Both 'published' and 'unlisted' documents belong in this tab —
- * 'unlisted' is what "Publish as a post" being off produces, and the
- * portal lists those here too. Scheduled ones are deliberately absent
- * until they go live.
+ * Space documents by slug. Files come from live Media rows, not the feed's `meta.document_lists`, which freezes names at creation.
+ * Both 'published' and 'unlisted' documents are listed, as in the portal.
  */
 
 namespace AppzaCore\Plugin\Rest;
@@ -42,19 +12,12 @@ if ( ! defined( 'WPINC' ) ) {
 
 class FluentCommunityDocumentsController {
 
-	/**
-	 * Statuses that belong in the documents tab. Mirrors FC Pro's
-	 * DocumentController::index.
-	 */
+	/** Mirrors FC Pro's DocumentController::index. */
 	private const VISIBLE_STATUSES = array( 'published', 'unlisted' );
 
 	public function permission_check() {
 		return PortalGuard::member();
 	}
-
-	/* ---------------------------------------------------------------
-	 * GET /spaces/documents
-	 * ------------------------------------------------------------- */
 
 	public function index( \WP_REST_Request $request ) {
 		global $wpdb;
@@ -103,8 +66,6 @@ class FluentCommunityDocumentsController {
 		);
 		$rows = $rows ?: array();
 
-		// Files come from the live Media rows, one query for the whole
-		// page rather than one per feed.
 		$files_by_feed = $this->files_for_feeds( wp_list_pluck( $rows, 'id' ) );
 		$names         = $this->display_names( wp_list_pluck( $rows, 'user_id' ) );
 
@@ -112,16 +73,12 @@ class FluentCommunityDocumentsController {
 		foreach ( $rows as $row ) {
 			$files = $files_by_feed[ (int) $row->id ] ?? array();
 
-			// A document feed whose files have all been deleted is
-			// noise — the portal shows an empty card, we drop it.
+			// Drop documents whose files were all deleted (the portal shows an empty card).
 			if ( ! $files ) {
 				continue;
 			}
 
-			// Search matches the post's own text OR any filename, so
-			// typing part of a filename finds its card. Done here
-			// rather than in SQL because the filename lives inside a
-			// serialised settings blob on a different table.
+			// In PHP, not SQL: filenames live in a serialised settings blob on another table.
 			if ( $search !== '' && ! $this->matches_search( $row, $files, $search ) ) {
 				continue;
 			}
@@ -151,23 +108,9 @@ class FluentCommunityDocumentsController {
 		);
 	}
 
-	/* ---------------------------------------------------------------
-	 * POST /spaces/documents/upload — one file per call
-	 * ------------------------------------------------------------- */
-
 	/**
-	 * Slug-addressed wrapper over fcom-mobile's /documents/upload.
-	 *
-	 * Same two reasons as the listing route: FC Pro's upload demands a
-	 * numeric `space_id`, and the mobile side only ever knows the slug.
-	 * The file itself is handed straight through as file params —
-	 * FileSystem::put ends up in wp_handle_upload, which refuses
-	 * anything that isn't a genuine POSTed upload, so the multipart
-	 * request has to survive intact rather than being reconstructed.
-	 *
-	 * One file per call, because FC's processSpaceFiles only ever reads
-	 * `$uploadedFiles[0]`. The client uploads N files as N calls and
-	 * collects the returned media objects for the create step.
+	 * Files pass straight through: wp_handle_upload refuses anything that isn't a genuine POSTed upload.
+	 * One file per call, because FC's processSpaceFiles reads only `$uploadedFiles[0]`.
 	 */
 	public function upload( \WP_REST_Request $request ) {
 		$space = $this->resolve_space( (string) $request->get_param( 'space_slug' ) );
@@ -203,11 +146,7 @@ class FluentCommunityDocumentsController {
 			return $this->error( 400, $message );
 		}
 
-		// The design lets a file be renamed before it is committed. FC
-		// stores the display name on the Media row's settings, and its
-		// own /documents/update is the only thing that also repairs the
-		// feed snapshot later — so rename through that rather than
-		// writing another plugin's table by hand.
+		// Rename via FC's /documents/update, the only path that also repairs the feed snapshot.
 		$rename = trim( (string) $request->get_param( 'title' ) );
 		if ( $rename !== '' && $rename !== (string) ( $file['title'] ?? '' ) ) {
 			list( $rename_status, $rename_body ) = $this->loopback_post(
@@ -221,14 +160,11 @@ class FluentCommunityDocumentsController {
 			if ( $rename_status >= 200 && $rename_status < 300 ) {
 				$file['title'] = $rename;
 			} else {
-				// Not fatal: the file IS uploaded. Report the original
-				// name rather than losing the upload over a label.
+				// Not fatal: the file is uploaded; keep the original name.
 				$file['rename_error'] = $this->upstream_message( $rename_body, __( 'The file kept its original name.', 'appza-core' ) );
 			}
 		}
 
-		// Same per-file shape the listing route emits, so the draft's
-		// pending rows and the saved card's rows render identically.
 		$file['kind'] = $this->file_kind(
 			isset( $file['type'] ) ? (string) $file['type'] : '',
 			isset( $file['title'] ) ? (string) $file['title'] : ''
@@ -245,20 +181,7 @@ class FluentCommunityDocumentsController {
 		);
 	}
 
-	/* ---------------------------------------------------------------
-	 * POST /spaces/documents/file/rename
-	 * ------------------------------------------------------------- */
-
-	/**
-	 * Rename a file that is already attached to a post.
-	 *
-	 * A file picked but not yet committed is renamed at upload time; this
-	 * is the other case — editing a document post that already exists.
-	 * Routed through FC's own /documents/update because that is the only
-	 * thing that ALSO repairs the feed's `document_lists` snapshot, which
-	 * the portal reads. Writing the Media row directly would rename the
-	 * file everywhere except the portal.
-	 */
+	/** Via FC's /documents/update, the only path that also repairs the `document_lists` snapshot the portal reads. */
 	public function rename_file( \WP_REST_Request $request ) {
 		$media_id = (int) $request->get_param( 'media_id' );
 		$title    = trim( (string) $request->get_param( 'title' ) );
@@ -297,25 +220,7 @@ class FluentCommunityDocumentsController {
 		);
 	}
 
-	/* ---------------------------------------------------------------
-	 * POST /spaces/documents/create — the document post itself
-	 * ------------------------------------------------------------- */
-
-	/**
-	 * Creates the document feed from already-uploaded files.
-	 *
-	 * Wrapping /feeds/create rather than calling it from the catalog
-	 * keeps three pieces of business logic on this side of the wire:
-	 *
-	 *   - `publish` (the design's "Publish as a post" switch) maps to
-	 *     status `published` vs `unlisted`. Unlisted documents still
-	 *     appear in the DOCUMENTS tab; they just stay out of the feed.
-	 *   - A space can require at least one topic, and FC's error for
-	 *     that arrives as a bare 422 the client would have to parse.
-	 *   - FC requires a non-empty message. The design makes both text
-	 *     fields optional, so we fall back title -> filename summary
-	 *     rather than rejecting an upload that is otherwise complete.
-	 */
+	/** FC requires a non-empty message; the design makes both text fields optional, hence the fallback. */
 	public function create( \WP_REST_Request $request ) {
 		$space = $this->resolve_space( (string) $request->get_param( 'space_slug' ) );
 		if ( ! $space ) {
@@ -363,31 +268,15 @@ class FluentCommunityDocumentsController {
 			$payload['scheduled_at'] = $scheduled_at;
 		}
 
-		// This one CANNOT be a nested rest_do_request.
-		//
-		// FluentCommunity's own Request object reads the JSON payload from
-		// `php://input` and the $_POST/$_GET superglobals — not from the
-		// WP_REST_Request it is handed. So a sub-request dispatched inside
-		// our own HTTP request reaches FC's validator with OUR body, not
-		// the one we just built, and comes back "Message is required"
-		// however carefully the sub-request is populated. (It appears to
-		// work when dispatched from a plain PHP page, because there is no
-		// outer body to shadow it — which makes this an easy one to
-		// "verify" wrongly.)
-		//
-		// A loopback HTTP POST gives FC a request whose php://input really
-		// is this payload. The caller's Authorization header rides along so
-		// FC sees the same user; every write path in the app authenticates
-		// that way.
+		// Loopback, not rest_do_request: FC reads its payload from php://input, so a nested dispatch carries OUR body
+		// ("Message is required"). It appears to work outside an HTTP request, so it is easy to mis-verify.
 		list( $status, $body ) = $this->loopback_post( '/feeds/create', $payload, $request );
 		if ( $status === 0 ) {
 			return $this->error( 502, $this->upstream_message( $body, __( 'Could not reach the community.', 'appza-core' ) ) );
 		}
 		if ( $status < 200 || $status >= 300 ) {
 			$message = $this->upstream_message( $body, '' );
-			// FC returns this when the space requires a topic and none
-			// was picked. Say so in the app's own words — the raw
-			// message names the web portal's field.
+			// FC's error when the space requires a topic; its wording names the portal's field.
 			if ( stripos( $message, 'topic' ) !== false ) {
 				$message = __( 'Pick at least one topic before uploading.', 'appza-core' );
 			}
@@ -408,16 +297,6 @@ class FluentCommunityDocumentsController {
 		);
 	}
 
-	/* ---------------------------------------------------------------
-	 * Presentation
-	 * ------------------------------------------------------------- */
-
-	/**
-	 * One card: the group header, its meta line, and its file rows.
-	 * Both strings are composed here rather than in the renderer
-	 * because they are conditional and must read exactly as the portal
-	 * does (P71).
-	 */
 	private function present( $row, array $files, array $names ): array {
 		$count  = count( $files );
 		$author = $names[ (string) $row->user_id ] ?? '';
@@ -447,11 +326,7 @@ class FluentCommunityDocumentsController {
 	}
 
 	/**
-	 * Files of ONE feed, in the same shape the documents tab renders.
-	 *
-	 * Public because the preview proxy needs it to enrich document posts
-	 * in the feed — where the only file data FC ships is the frozen
-	 * `meta.document_lists` snapshot with an unusable portal URL.
+	 * Public: the preview proxy uses it to enrich document posts in the feed.
 	 *
 	 * @return array<int, array<string, mixed>>
 	 */
@@ -460,13 +335,7 @@ class FluentCommunityDocumentsController {
 		return $byFeed[ $feed_id ] ?? array();
 	}
 
-	/**
-	 * Live file rows keyed by feed id.
-	 *
-	 * `title` resolves the same way Media::getFileTitle does, so a file
-	 * renamed via /documents/update shows its new name immediately
-	 * instead of whatever the feed meta snapshot froze.
-	 */
+	/** `title` resolves as Media::getFileTitle does, so a rename shows immediately. */
 	private function files_for_feeds( array $feed_ids ): array {
 		global $wpdb;
 
@@ -512,22 +381,10 @@ class FluentCommunityDocumentsController {
 				'media_key' => (string) $row->media_key,
 				'title'     => $title,
 				'type'      => (string) $row->media_type,
-				// What tapping a file row opens — and it has to be the FILE.
-				//
-				// This used to point at fcom-mobile's /documents/download,
-				// which reads like the right thing and is not: that route
-				// returns JSON ({file_name, media_type, file_url} with the
-				// URL base64-encoded) for an app to act on, and it requires
-				// authentication. Opening it in a browser or a WebView gets
-				// a 401 or a page of JSON, never a download — which is
-				// exactly what Noor saw on the phone.
-				//
-				// media_url is the direct uploads URL, and it is what
-				// fcom-mobile itself hands back for the local driver.
+				// The file itself: fcom-mobile's /documents/download returns authenticated JSON, not a download.
 				'url'       => $this->file_url( $row ),
 				'media_url' => $this->absolute_url( (string) $row->media_url ),
-				// Kept so a client that wants the JSON contract (file name,
-				// mime, signed URL for remote storage) can still ask.
+				// For clients that want the JSON contract (e.g. signed URLs for remote storage).
 				'download_api_url' => add_query_arg(
 					array(
 						'media_key' => rawurlencode( (string) $row->media_key ),
@@ -535,8 +392,6 @@ class FluentCommunityDocumentsController {
 					),
 					home_url( '/wp-json/fcom-mobile/api/v1/documents/download' )
 				),
-				// 'image' gets the picture glyph in the design, every
-				// other kind gets the document glyph.
 				'kind'      => $this->file_kind( (string) $row->media_type, $title ),
 			);
 		}
@@ -544,15 +399,7 @@ class FluentCommunityDocumentsController {
 		return $out;
 	}
 
-	/**
-	 * The URL that actually yields the file.
-	 *
-	 * `media_url` when FC recorded one. When it didn't — rows whose upload
-	 * bypassed wp_handle_upload — fall back to deriving it from
-	 * media_path, which is still a real location under wp-content/uploads.
-	 * Returns '' when neither resolves, so the client can render the row
-	 * without a dead link rather than opening a 404.
-	 */
+	/** Falls back to media_path for rows that bypassed wp_handle_upload; '' when neither resolves. */
 	private function file_url( $row ): string {
 		$url = $this->absolute_url( (string) $row->media_url );
 		if ( $url !== '' ) {
@@ -575,9 +422,6 @@ class FluentCommunityDocumentsController {
 		return trailingslashit( $uploads['baseurl'] ) . $relative;
 	}
 
-	/**
-	 * Absolutize a stored media URL. Already-absolute URLs pass through.
-	 */
 	private function absolute_url( string $url ): string {
 		if ( $url === '' ) {
 			return '';
@@ -588,10 +432,7 @@ class FluentCommunityDocumentsController {
 		return home_url( '/' . ltrim( $url, '/' ) );
 	}
 
-	/**
-	 * Which glyph the row shows. Falls back to the extension because
-	 * media_type is null on rows migrated in from older uploads.
-	 */
+	/** Falls back to the extension: media_type is null on rows migrated from older uploads. */
 	private function file_kind( string $mime, string $title ): string {
 		if ( $mime !== '' && strpos( $mime, 'image/' ) === 0 ) {
 			return 'image';
@@ -626,10 +467,6 @@ class FluentCommunityDocumentsController {
 		return function_exists( 'mb_strtolower' ) ? mb_strtolower( $value ) : strtolower( $value );
 	}
 
-	/**
-	 * "8 days ago" — WordPress's own phrasing so the app matches the
-	 * portal, which renders the same relative string.
-	 */
 	private function time_ago( string $created_at ): string {
 		$ts = strtotime( $created_at . ' UTC' );
 		if ( ! $ts ) {
@@ -665,7 +502,6 @@ class FluentCommunityDocumentsController {
 			$out[ (string) $row->user_id ] = (string) $row->display_name;
 		}
 
-		// Anyone without an FC profile still has a WP display name.
 		foreach ( $user_ids as $id ) {
 			if ( ! isset( $out[ $id ] ) ) {
 				$user = get_userdata( (int) $id );
@@ -678,10 +514,6 @@ class FluentCommunityDocumentsController {
 		return $out;
 	}
 
-	/* ---------------------------------------------------------------
-	 * Permissions
-	 * ------------------------------------------------------------- */
-
 	private function can_view( int $space_id, int $user_id ): bool {
 		if ( $user_id <= 0 ) {
 			return false;
@@ -692,10 +524,6 @@ class FluentCommunityDocumentsController {
 		return $this->space_role( $space_id, $user_id ) !== '';
 	}
 
-	/**
-	 * Reported in `meta.can_upload` so the FAB can be hidden for
-	 * read-only members. Chunk 2 gates the upload path on it too.
-	 */
 	private function can_upload( int $space_id, int $user_id ): bool {
 		return $this->can_view( $space_id, $user_id );
 	}
@@ -730,17 +558,9 @@ class FluentCommunityDocumentsController {
 	}
 
 	/**
-	 * POST to an fcom-mobile route over loopback HTTP, forwarding the
-	 * caller's credentials.
+	 * Loopback, not rest_do_request: FC reads its payload from php://input, so a nested dispatch carries OUR body.
 	 *
-	 * Not `rest_do_request`: FluentCommunity's Request reads its JSON
-	 * payload from `php://input` and the superglobals rather than from
-	 * the WP_REST_Request it is given, so a nested dispatch reaches FC
-	 * carrying OUR request body instead of the one being sent. Only a
-	 * real HTTP request gives it the right `php://input`.
-	 *
-	 * Returns [status, decoded body]; status 0 means the request never
-	 * completed.
+	 * @return array{0:int, 1:array} [status, decoded body]; status 0 = never completed.
 	 */
 	private function loopback_post( string $route, array $payload, \WP_REST_Request $request ): array {
 		$headers = array( 'Content-Type' => 'application/json' );
@@ -770,14 +590,7 @@ class FluentCommunityDocumentsController {
 		return array( $status, is_array( $body ) ? $body : array() );
 	}
 
-	/**
-	 * Best-effort human message out of an upstream body.
-	 *
-	 * Neither fcom-mobile nor FC settles on one error shape: a failure
-	 * arrives as `response.message`, or WP's `message`, or a `errors`
-	 * bag keyed by field. Reading only one of them turned a 422 into an
-	 * uncaught TypeError once already.
-	 */
+	/** fcom-mobile and FC disagree on error shape: `response.message`, `message` (maybe a field bag), or `errors`. */
 	private function upstream_message( $body, string $fallback ): string {
 		if ( ! is_array( $body ) ) {
 			return $fallback;
@@ -790,9 +603,6 @@ class FluentCommunityDocumentsController {
 			if ( is_string( $value ) && $value !== '' ) {
 				return $value;
 			}
-			// FC returns `message` as a field-error bag on validation
-			// failures ({"required":"Message is required"}), so the string
-			// check alone silently loses the only useful text.
 			if ( is_array( $value ) ) {
 				foreach ( $value as $one ) {
 					if ( is_string( $one ) && $one !== '' ) {

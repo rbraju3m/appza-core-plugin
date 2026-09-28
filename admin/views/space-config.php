@@ -1,15 +1,5 @@
 <?php
-/**
- * Space Config editor view. Renders a picker + per-section form so a
- * site admin can edit the JSON config per FluentCommunity space
- * without touching the DB.
- *
- * Supplied by AdminMenu::render_space_config():
- *   $spaces    array — [{slug, title}]
- *   $configs   array — { slug => config array }
- *   $rest_root string — REST base URL for /space-config
- *   $nonce     string — wp_rest nonce for the fetch call
- */
+/** Variables supplied by AdminMenu::render_space_config(). */
 
 if ( ! defined( 'WPINC' ) ) {
 	die;

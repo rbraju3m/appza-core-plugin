@@ -1,44 +1,8 @@
 <?php
 /**
- * Space invitations — list / create / delete / resend.
- *
- *   GET  /wp-json/fcom-mobile/api/v1/spaces/invitations
- *   POST /wp-json/fcom-mobile/api/v1/spaces/invitations
- *   POST /wp-json/fcom-mobile/api/v1/spaces/invitations/delete
- *   POST /wp-json/fcom-mobile/api/v1/spaces/invitations/resend
- *
- * Registered under the fcom-mobile namespace (not appza/v1) per P68 —
- * the mobile catalog treats invitations as FluentCommunity data and
- * always calls them via the fcom-mobile prefix. fcom-mobile itself
- * ships no invitation endpoints, and it is third-party so we never
- * edit it; WordPress lets any plugin add routes to any namespace.
- *
- * Reads go straight to the DB. FluentCommunity's own list endpoint
- * (GET /fluent-community/v2/invitations) hard-filters on
- * `user_id = <current user>` BEFORE its own is_mod branch runs, so a
- * space moderator can only ever see invitations they personally sent
- * — which would empty out the "Invited by" column the design shows.
- * Ours scopes by space and lets space admins/moderators see every
- * invitation for that space.
- *
- * Writes are dispatched internally into FluentCommunity's own routes
- * via rest_do_request() so FC keeps ownership of validation, the
- * permission checks, the invitation token, and the outbound email.
- * The one thing FC has no concept of is a membership *role* on an
- * invitation, so we stamp `meta.role` onto the row after FC creates
- * it, and read it back on list.
- *
- * Invitations live in wp_fcom_post_comments with type='invitation'
- * and come in two shapes:
- *   - email invite: message=<email>, status='pending',
- *     meta={invitee_name, role?}
- *   - link invite:  message='',      status='active',
- *     meta={title, limit, expire_date, role?}; reactions_count is
- *     the number of times the link has been used.
- *
- * Auth: logged-in WP user. Space admins + moderators (and WP users
- * with manage_options) see and manage the whole space's invitations;
- * everyone else is scoped to their own.
+ * Space invitations under the fcom-mobile namespace.
+ * Reads query the DB directly: FC's own list filters to invitations the caller sent, even for moderators.
+ * Writes go through FC's routes so FC owns validation, tokens and email; FC has no invitation role, so we stamp meta.role.
  */
 
 namespace AppzaCore\Plugin\Rest;
@@ -49,18 +13,11 @@ if ( ! defined( 'WPINC' ) ) {
 
 class FluentCommunityInvitationsController {
 
-	/**
-	 * Roles that may see + manage every invitation in a space.
-	 */
 	private const MANAGER_ROLES = array( 'admin', 'moderator' );
 
 	public function permission_check() {
 		return PortalGuard::member();
 	}
-
-	/* ---------------------------------------------------------------
-	 * GET /spaces/invitations
-	 * ------------------------------------------------------------- */
 
 	public function index( \WP_REST_Request $request ) {
 		global $wpdb;
@@ -88,14 +45,11 @@ class FluentCommunityInvitationsController {
 		$where  = array( "type = 'invitation'", 'post_id = %d' );
 		$params = array( (int) $space->id );
 
-		// Non-managers only ever see the invitations they sent.
 		if ( ! $is_admin ) {
 			$where[]  = 'user_id = %d';
 			$params[] = $user_id;
 		}
 
-		// 'all' (and an empty value) means no status filter, matching
-		// the portal's own status dropdown.
 		if ( $status !== '' && $status !== 'all' ) {
 			$where[]  = 'status = %s';
 			$params[] = $status;
@@ -141,20 +95,7 @@ class FluentCommunityInvitationsController {
 		);
 	}
 
-	/* ---------------------------------------------------------------
-	 * POST /spaces/invitations
-	 * ------------------------------------------------------------- */
-
-	/**
-	 * Two outcomes, decided by whether the email already belongs to a
-	 * WP user:
-	 *   - known email  → add them to the space immediately with the
-	 *     chosen role (no email sent). This is what the design's
-	 *     helper text promises; FluentCommunity's own endpoint would
-	 *     email them instead.
-	 *   - new email    → let FC create the invitation + send the mail,
-	 *     then stamp the chosen role onto meta.
-	 */
+	// An email that already belongs to a WP user is added directly (no mail); FC's endpoint would email them.
 	public function store( \WP_REST_Request $request ) {
 		$space_slug   = (string) $request->get_param( 'space_slug' );
 		$email        = sanitize_email( (string) $request->get_param( 'email' ) );
@@ -223,9 +164,6 @@ class FluentCommunityInvitationsController {
 			return $this->error( $created['status'], $created['message'] );
 		}
 
-		// FC has no role concept on invitations — stamp ours onto the
-		// row it just created so the list can show the role chip and a
-		// future accept-handler can apply it.
 		$invitation_id = 0;
 		if ( isset( $created['data']['invitation']['id'] ) ) {
 			$invitation_id = (int) $created['data']['invitation']['id'];
@@ -247,18 +185,13 @@ class FluentCommunityInvitationsController {
 		);
 	}
 
-	/* ---------------------------------------------------------------
-	 * POST /spaces/invitations/delete
-	 * ------------------------------------------------------------- */
-
 	public function destroy( \WP_REST_Request $request ) {
 		$invitation_id = (int) $request->get_param( 'invitation_id' );
 		if ( $invitation_id <= 0 ) {
 			return $this->error( 400, __( 'An invitation id is required.', 'appza-core' ) );
 		}
 
-		// FC verifies the caller is a moderator of the invitation's
-		// space before deleting, so no extra gate is layered here.
+		// FC checks the caller moderates the invitation's space.
 		$res = $this->dispatch( 'DELETE', '/fluent-community/v2/invitations/' . $invitation_id, array() );
 		if ( ! $res['ok'] ) {
 			return $this->error( $res['status'], $this->friendly( $res ) );
@@ -274,10 +207,6 @@ class FluentCommunityInvitationsController {
 			)
 		);
 	}
-
-	/* ---------------------------------------------------------------
-	 * POST /spaces/invitations/resend
-	 * ------------------------------------------------------------- */
 
 	public function resend( \WP_REST_Request $request ) {
 		$invitation_id = (int) $request->get_param( 'invitation_id' );
@@ -301,17 +230,6 @@ class FluentCommunityInvitationsController {
 		);
 	}
 
-	/* ---------------------------------------------------------------
-	 * Row presentation
-	 * ------------------------------------------------------------- */
-
-	/**
-	 * Shape one DB row into what the modal renders. Everything the
-	 * design shows as a single line of text is composed here rather
-	 * than in the renderer, because the composition is conditional
-	 * (usage and expiry only appear when set) and must stay identical
-	 * to the web portal's own row rendering.
-	 */
 	private function present( $row, array $names ): array {
 		$meta    = $this->read_meta( $row->meta );
 		$is_link = trim( (string) $row->message ) === '';
@@ -322,9 +240,7 @@ class FluentCommunityInvitationsController {
 		$expire_date = isset( $meta['expire_date'] ) ? (string) $meta['expire_date'] : '';
 		$role        = isset( $meta['role'] ) && $meta['role'] !== '' ? $this->normalize_role( (string) $meta['role'] ) : '';
 
-		// FluentCommunity flips a spent or lapsed link to 'expired'
-		// lazily, on read. Mirror that here so the app and the portal
-		// never disagree about a link's state.
+		// FC flips spent/lapsed links to 'expired' lazily on read; mirror it.
 		if ( $is_link && $status === 'active' ) {
 			$lapsed = $expire_date !== '' && strtotime( $expire_date ) < strtotime( gmdate( 'Y-m-d', current_time( 'timestamp' ) ) );
 			$spent  = $limit > 0 && $usage >= $limit;
@@ -338,24 +254,17 @@ class FluentCommunityInvitationsController {
 			? sprintf( '%s(%s)', (string) ( $meta['title'] ?? '' ), __( 'Invitation Link', 'appza-core' ) )
 			: trim( sprintf( '%s <%s>', (string) ( $meta['invitee_name'] ?? '' ), (string) $row->message ) );
 
-		// Usable per FluentCommunity's Invitation::isValid(): an email
-		// invite while pending, a link invite while active.
+		// Mirrors FC's Invitation::isValid().
 		$is_valid = $is_link ? ( $status === 'active' ) : ( $status === 'pending' );
 
-		// Expired invitations keep their Copy Link, per the design. The
-		// URL still exists — FluentCommunity's accept flow is what
-		// rejects it on use — so this is wider than the web portal,
-		// which hides the control once an invitation lapses.
+		// Deliberately wider than the portal: FC's accept flow rejects expired tokens on use.
 		$can_copy = $is_valid || $status === 'expired';
 
 		$access_url = $can_copy
 			? $this->access_url( (string) $row->message_rendered )
 			: '';
 
-		// Link invites only, exactly as the portal renders it. On an
-		// email invite reactions_count counts how many times the mail
-		// has been SENT, not how many times a link was used, so
-		// surfacing it as "Usage" would be a lie.
+		// Link invites only: on an email invite reactions_count is the SEND count, not usage.
 		$meta_parts = array();
 		if ( $is_link ) {
 			if ( $limit > 0 ) {
@@ -369,10 +278,6 @@ class FluentCommunityInvitationsController {
 			}
 		}
 
-		// The chip reads as the membership role when the invitation
-		// carries one (everything created from the app does); links
-		// made in the web portal have no role, so they fall back to
-		// showing their status.
 		$chip_label = $role !== '' ? $this->role_label( $role ) : $this->status_label( $status );
 		$chip_tone  = $role !== '' ? 'success' : $this->status_tone( $status );
 
@@ -390,9 +295,7 @@ class FluentCommunityInvitationsController {
 			'chip_tone'    => $chip_tone,
 			'access_url'   => $access_url,
 			'can_copy'     => $access_url !== '',
-			// Same rule the portal uses: pending only, and FC refuses
-			// past five sends. Link invites are never 'pending', so
-			// they fall out of this naturally.
+			// FC refuses past five sends.
 			'can_resend'   => $status === 'pending' && $usage <= 5,
 			'can_delete'   => true,
 			'limit'        => $limit,
@@ -404,20 +307,7 @@ class FluentCommunityInvitationsController {
 		);
 	}
 
-	/* ---------------------------------------------------------------
-	 * Helpers
-	 * ------------------------------------------------------------- */
-
-	/**
-	 * Run a WP REST route in-process. Used for every write so that
-	 * FluentCommunity's own controllers own validation, permissions
-	 * and the invitation email.
-	 *
-	 * Body params are also mirrored into $_REQUEST/$_GET for the
-	 * duration of the call: FC's framework Request wrapper reads a
-	 * few fields (per_page, page, status, …) straight off the PHP
-	 * superglobals rather than off WP_REST_Request (P61).
-	 */
+	// Params are mirrored into $_REQUEST/$_GET: FC's Request wrapper reads some fields off the superglobals.
 	private function dispatch( string $method, string $route, array $body ): array {
 		$req = new \WP_REST_Request( $method, $route );
 		if ( $body ) {
@@ -454,9 +344,7 @@ class FluentCommunityInvitationsController {
 		$data   = $response->get_data();
 		$data   = is_array( $data ) ? $data : array();
 
-		// fcom-mobile routes always answer 200 and carry the real
-		// outcome in response.status; FC's own routes use the HTTP
-		// status directly. Honour whichever one is present.
+		// fcom-mobile answers HTTP 200 with the real status in response.status; FC uses the HTTP status.
 		$inner = isset( $data['response']['status'] ) ? (int) $data['response']['status'] : null;
 		$ok    = $inner !== null ? $inner === 200 : ( $status >= 200 && $status < 300 );
 
@@ -475,13 +363,7 @@ class FluentCommunityInvitationsController {
 		);
 	}
 
-	/**
-	 * FluentCommunity answers a missing invitation with its raw ORM
-	 * exception text ("No query results for model [\FluentCommunity\
-	 * Modules\Auth\Classes\Invitation] 32"), which would go straight
-	 * into a toast. Swap that one case for something readable and
-	 * pass every other message through untouched.
-	 */
+	// FC answers a missing invitation with raw ORM exception text.
 	private function friendly( array $res ): string {
 		if ( (int) $res['status'] === 404 ) {
 			return __( 'That invitation no longer exists.', 'appza-core' );
@@ -506,11 +388,6 @@ class FluentCommunityInvitationsController {
 		);
 	}
 
-	/**
-	 * Space admins + moderators manage the whole space's invitations.
-	 * WP administrators are treated as space admins so a site owner
-	 * who never joined the space can still run it.
-	 */
 	private function can_manage_space( int $space_id, int $user_id ): bool {
 		global $wpdb;
 
@@ -546,10 +423,6 @@ class FluentCommunityInvitationsController {
 		);
 	}
 
-	/**
-	 * Display names for the "Invited by" line, preferring the
-	 * FluentCommunity profile name over the WP one.
-	 */
 	private function display_names( array $user_ids ): array {
 		global $wpdb;
 
@@ -657,10 +530,6 @@ class FluentCommunityInvitationsController {
 		return $labels[ $status ] ?? ucfirst( $status );
 	}
 
-	/**
-	 * Semantic tone rather than a colour — the modal AppZet maps each
-	 * tone to an author-editable colour so the chip stays themeable.
-	 */
 	private function status_tone( string $status ): string {
 		switch ( $status ) {
 			case 'pending':

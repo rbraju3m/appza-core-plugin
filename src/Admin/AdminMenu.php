@@ -1,20 +1,4 @@
 <?php
-/**
- * Registers the APPZA Core admin menu and renders its pages.
- *
- * Two pages under the "APPZA Core" top-level item:
- *
- *   1. "App" (default landing) — mounts the React simulator from
- *      assets/admin/. The React app reads bootstrap data from the
- *      WP REST API directly; no PHP-side state required.
- *
- *   2. "Sync" (submenu) — the ops surface for the Pull-from-Core
- *      round-trip. Version registry + Pull form + local snapshot
- *      table. Same data shown the React app may eventually consume
- *      inline, but keeping a server-rendered ops view means the
- *      sync flow stays usable even if the React build is missing.
- */
-
 namespace AppzaCore\Plugin\Admin;
 
 use AppzaCore\Plugin\Repository\CatalogMetaRepository;
@@ -43,8 +27,6 @@ class AdminMenu {
 			58
 		);
 
-		// Rename the auto-generated first submenu to "App" so the menu
-		// reads as "APPZA Core > App / Sync".
 		add_submenu_page(
 			self::SLUG,
 			__( 'APPZA Core — App', 'appza-core' ),
@@ -63,11 +45,7 @@ class AdminMenu {
 			array( $this, 'render_sync' )
 		);
 
-		// Space Config admin page intentionally not registered — the
-		// right-panel Properties in the App simulator carry all AppZet
-		// knobs (uniformly per-template). Keep render_space_config +
-		// REST endpoint below for programmatic per-space overrides
-		// (wp_appza_space_config table still consumed by the enricher).
+		// Space Config page deliberately unregistered; render_space_config stays for its REST/enricher use.
 	}
 
 	public function render_app() {

@@ -1,22 +1,6 @@
 <?php
 /**
  * GET /wp-json/appza/v1/source-integrations
- *
- * Powers the admin onboarding wizard "Select App" step. Pulls the active
- * Source Integrations from the Core and merges local WP install state so
- * the UI can render toggle + disabled correctly:
- *
- *   [
- *     { slug, name, addon_plugin_slug, addon_min_version, description,
- *       is_installed, is_disable }
- *   ]
- *
- * - is_installed: the APPZA add-on plug-in for this Source is active in
- *   this WP install (checked via `{slug}/{slug}.php` convention).
- * - is_disable:   !is_installed — the wizard shows the toggle greyed out
- *   with an "install the add-on first" affordance handled client-side.
- *
- * Public-read v1 — no auth. Prod license-key handshake is a separate DC.
  */
 
 namespace AppzaCore\Plugin\Rest;
@@ -45,9 +29,7 @@ class SourceIntegrationsController {
 			include_once ABSPATH . 'wp-admin/includes/plugin.php';
 		}
 
-		// WP stores active plugins as `<folder>/<file>.php`. Folder and main
-		// file basename don't have to match (e.g. `tutor-lms-api/tutor-lms-mobile.php`).
-		// Extract both halves once so the per-row check is cheap.
+		// Folder and main file can differ (tutor-lms-api/tutor-lms-mobile.php), so match either.
 		$active_pairs = array();
 		foreach ( (array) get_option( 'active_plugins', array() ) as $plugin_file ) {
 			if ( ! is_string( $plugin_file ) || false === strpos( $plugin_file, '/' ) ) {
@@ -64,8 +46,6 @@ class SourceIntegrationsController {
 				continue;
 			}
 			$addon = (string) $row['addon_plugin_slug'];
-			// Matches when the Core's addon_plugin_slug equals either the
-			// folder name or the main file basename of any active plug-in.
 			$is_installed = false;
 			foreach ( $active_pairs as $pair ) {
 				if ( $pair[0] === $addon || $pair[1] === $addon ) {

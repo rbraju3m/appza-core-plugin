@@ -1,13 +1,4 @@
 <?php
-/**
- * Hooks registry — collects action + filter registrations, then flushes them
- * to WordPress in a single pass at `run()` time.
- *
- * Pattern from the WP Plugin Boilerplate: lets the orchestrator declare all
- * its wiring up front instead of scattering add_action() calls across many
- * constructors. Keeps the boot path readable.
- */
-
 if ( ! defined( 'WPINC' ) ) {
 	die;
 }

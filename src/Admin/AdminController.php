@@ -1,13 +1,4 @@
 <?php
-/**
- * Handles the admin-post hook for "Pull from Core".
- *
- * Calls CoreClient to fetch a snapshot for the requested template_slug,
- * upserts the result into wp_appza_catalog_snapshot via the repository, and
- * bumps wp_appza_catalog_meta.catalog_snapshot_version on success. Outcomes
- * (success/error) flow back to the dashboard via transient admin notices.
- */
-
 namespace AppzaCore\Plugin\Admin;
 
 use AppzaCore\Plugin\Repository\CatalogMetaRepository;

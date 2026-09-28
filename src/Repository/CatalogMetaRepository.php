@@ -1,12 +1,4 @@
 <?php
-/**
- * Get / bump for wp_appza_catalog_meta. Singleton row at id=1.
- *
- * Bootstrap endpoint reads the row to include version markers in its envelope.
- * Pull-from-Core action bumps catalog_snapshot_version after a successful pull.
- * Customizations admin (Phase 1B.5+) bumps customizations_version on save.
- */
-
 namespace AppzaCore\Plugin\Repository;
 
 use AppzaCore\Plugin\Schema\CatalogMetaSchema;

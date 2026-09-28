@@ -1,17 +1,6 @@
 <?php
 /**
- * GET /wp-json/appza/v1/templates
- *
- * Powers the plug-in admin's "Template" dropdown. Reads the site's
- * activated Source Integrations from the local option
- * (`appza_core_active_source_integrations`) and asks the Core for the
- * Templates tied to those Sources.
- *
- * Empty active set → returns an empty templates array (matches the
- * onboarding-not-done UX; the dropdown will show a "pick an app first"
- * hint client-side).
- *
- * Response shape mirrors the Core's — `{ core_api_version, templates[] }`.
+ * GET /wp-json/appza/v1/templates — Core templates for the site's active Source Integrations.
  */
 
 namespace AppzaCore\Plugin\Rest;

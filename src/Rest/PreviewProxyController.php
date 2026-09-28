@@ -1,22 +1,7 @@
 <?php
 /**
- * GET /wp-json/appza/v1/preview/data?ds=<slug>&params=<json>
- *
- * Backs the renderer's `useDataSource()` hook. Routes a catalog DataSource
- * slug to the matching WP REST endpoint that lives on this WP install
- * (typically a fcom-mobile / appza-builder controller). Caches per-session
- * via WP transients (5 min TTL) so the simulator's many AppZets each
- * fetching from the same source don't hammer the upstream.
- *
- * Same proxy serves both the plugin-admin simulator AND the Capacitor
- * mobile app, so the renderer never branches on context.
- *
- * Fallback: when the upstream returns 4xx/5xx OR the catalog row's endpoint
- * is missing (dev environment with broken legacy plugins), a small fixture
- * dataset keyed by data source slug is served so the preview still renders
- * realistic content.
- *
- * Viewer = get_current_user_id(): core-validated Authorization, else guest.
+ * GET /wp-json/appza/v1/preview/data?ds=<slug>&params=<json> — proxies a catalog DataSource to its WP REST
+ * endpoint for both the simulator and the mobile app. Viewer = get_current_user_id() (core-validated auth).
  */
 
 namespace AppzaCore\Plugin\Rest;
@@ -66,32 +51,19 @@ class PreviewProxyController {
 		$auth_header = $this->extract_auth_header( $request );
 		$auth_bucket = self::bucket_for_user( $viewer_id );
 
-		// The viewer's cache generation rides IN the key, so a write can
-		// invalidate every cached read this viewer holds by incrementing
-		// one integer — no enumerating transients, and it works the same
-		// whether transients live in the options table or an external
-		// object cache. Orphaned entries are already TTL-bounded and
-		// simply expire unread. See bump_generation() below.
+		// The generation in the key lets bump_generation() invalidate all of a viewer's cached reads at once.
 		$generation = self::generation_for( $auth_bucket );
 		$cache_key  = 'appza_preview_' . $auth_bucket . '_' . $generation . '_'
 			. md5( $template_slug . '|' . $ds_slug . '|' . self::canonical_params( $params_json ) . '|' . $mode );
 
-		// The catalog's own cache_ttl for this DataSource. 0 means "never
-		// cache" — fc-bookmarks declares it because the Saved Posts list
-		// changes the moment the viewer un-saves something. Until now the
-		// column was decorative: every source was cached for a flat 300s
-		// regardless of what it asked for, so a source that had declared
-		// itself uncacheable was cached for five minutes.
+		// The DataSource's own cache_ttl; 0 means never cache (e.g. fc-bookmarks).
 		$cache_ttl = $this->resolve_cache_ttl( $template_slug, $ds_slug );
 		$endpoint  = 'demo' === $mode ? null : $this->resolve_endpoint( $template_slug, $ds_slug );
 		if ( null === $endpoint || strlen( $params_json ) > 1024 ) {
 			$cache_ttl = 0;
 		}
 
-		// `nocache=1` bypasses the transient read (still writes fresh result
-		// after fetch, so subsequent normal reads benefit). Used by
-		// plug-in-admin's Refresh button + window-focus revalidation to
-		// pull new upstream posts without waiting out the TTL.
+		// nocache=1 skips the cached read but still writes the fresh result.
 		$nocache = '1' === (string) $request->get_param( 'nocache' );
 		if ( ! $nocache && $cache_ttl > 0 ) {
 			$cached = get_transient( $cache_key );
@@ -116,11 +88,7 @@ class PreviewProxyController {
 
 		$payload = $this->normalize_items( $payload, $viewer_id );
 
-		// fc-spaces-my is by-definition a "joined spaces" list, but the
-		// upstream /spaces payload omits space_pivot. Stamp a synthetic
-		// pivot so the shared fc-space-card visible_when for View Space
-		// (children[10] "space_pivot exists") evaluates true — otherwise
-		// the My tab renders Join CTAs on spaces the viewer already joined.
+		// Upstream /spaces omits space_pivot; stamp it so the card's View Space gate holds on the My tab.
 		if ( 'fc-spaces-my' === $ds_slug && is_array( $payload ) ) {
 			foreach ( $payload as $i => $item ) {
 				if ( is_array( $item ) && ! isset( $item['space_pivot'] ) ) {
@@ -131,11 +99,6 @@ class PreviewProxyController {
 			}
 		}
 
-		// The profile header's second line. FluentCommunity's portal draws
-		// "@username · N points" there and the endpoint carries no such
-		// field — only the parts. Joined here rather than in two children
-		// sharing a grid cell, which is the mistake D69 unpicked on the
-		// post card's byline.
 		if ( 'fc-member-profile' === $ds_slug && is_array( $payload ) ) {
 			foreach ( $payload as $i => $item ) {
 				if ( ! is_array( $item ) ) {
@@ -152,20 +115,8 @@ class PreviewProxyController {
 				}
 				$payload[ $i ]['profile_byline'] = implode( ' · ', $bits );
 
-				// The follow cluster's gates, and the two header counts.
-				//
-				// FluentCommunity Pro appends `follow` — the LEVEL — only when
-				// a row exists for this viewer -> this profile, and unfollow
-				// DELETES that row. So an absent key is the "not following"
-				// state, not a missing field; reading it as 0 would say
-				// "blocked", which is a different thing entirely.
-				//
-				//   0 = blocked · 1 = following · 2 = following + notify
-				//
-				// Derived here rather than in the catalog because a field
-				// mapping can only bind a PATH, and "absent, not zero" is not
-				// a path. Both viewer-relative keys are also absent on your
-				// own profile by design — FC skips them when viewer == target.
+				// FC Pro sets `follow` (0 blocked, 1 following, 2 +notify) only when a row exists, so absent means
+				// "not following", not blocked. Absent on your own profile too.
 				$profile_user_id = isset( $item['user_id'] ) ? (int) $item['user_id'] : 0;
 				$follow_level    = ( array_key_exists( 'follow', $item ) && is_numeric( $item['follow'] ) )
 					? (int) $item['follow']
@@ -175,22 +126,10 @@ class PreviewProxyController {
 				$payload[ $i ]['follow_level']    = $follow_level;
 				$payload[ $i ]['is_following']    = ( null !== $follow_level && $follow_level >= 1 );
 				$payload[ $i ]['is_notifying']    = ( 2 === $follow_level );
-				// FC's follow() rejects a blocked user outright ("already
-				// following or blocked"), so a Follow button drawn on one is a
-				// button that can only fail. The cluster gates on this.
+				// FC's follow() rejects blocked users.
 				$payload[ $i ]['is_blocked_by_viewer'] = ( 0 === $follow_level );
 
-				// Whether this viewer may MESSAGE this member, and it is
-				// FluentCommunity's answer rather than ours (2026-09-02).
-				//
-				// `profile_nav_actions` is FC's own per-viewer action list
-				// for a profile; today it holds exactly one entry — Message,
-				// pointing at `/portal/chat?user_id=N`. Reading it here is
-				// the same reasoning as D76, where the profile tab strip
-				// stopped being a list we kept: messaging can be switched
-				// off, a profile can be private, and both rules are FC's to
-				// change. A `show_message` toggle of ours would be a second
-				// copy of them, wrong the day either moves.
+				// FC's own per-viewer profile_nav_actions decides whether messaging is allowed.
 				$can_message = false;
 				if ( isset( $item['profile_nav_actions'] ) && is_array( $item['profile_nav_actions'] ) ) {
 					foreach ( $item['profile_nav_actions'] as $nav_action ) {
@@ -207,36 +146,15 @@ class PreviewProxyController {
 				}
 				$payload[ $i ]['can_message'] = $can_message;
 
-				// Whether the VIEWER is a moderator — which nothing on this
-				// row answered. `is_moderator` is FluentCommunity's word for
-				// the SUBJECT ("no" on demo_student's row while raju, an
-				// admin, was looking at it), so the ⋯ menu's
-				// Add To Space/Course row had no flag to gate on.
+				// FC's `is_moderator` describes the profile's subject, not the viewer.
 				$viewer_roles = $this->viewer_roles( $viewer_id );
 				$payload[ $i ]['viewer_is_moderator'] = $viewer_roles['is_moderator'] || $viewer_roles['is_admin'];
 
-				// The ⋯ menu's two block rows, as POSITIVE fields.
-				//
-				// A menu row's `visible_when` is a truthiness test on a
-				// PATH — there is no negation in that grammar and adding
-				// one would change how every menu in the catalog is read.
-				// So "not blocked" gets its own field, the way
-				// `permissions.can_report` and the rest already do.
+				// Menu visible_when cannot negate, so publish positive fields.
 				$is_self = ( $viewer_id > 0 && $profile_user_id === $viewer_id );
 
-				// FluentCommunity refuses a block for three reasons, and
-				// all three are knowable here — so the row is hidden
-				// rather than offered and then refused. MEASURED, not
-				// guessed: tapping Block as raju answered "Sorry, You
-				// cannot block a user as you are a moderator."
-				//
-				// Its rules, in its own order (FollowController::block):
-				// not yourself, not a moderator as the TARGET, and not a
-				// moderator as the VIEWER. That last one uses
-				// `Helper::isModerator()` specifically — a site admin who
-				// is not a community moderator may still block — which is
-				// why this reads the strict flag and the ⋯ menu's
-				// Add To Space/Course row reads the union.
+				// Mirrors FC FollowController::block: not self, target not a moderator, viewer not Helper::isModerator()
+				// (a site admin who is not a moderator may still block).
 				$target_is_moderator = ( 'yes' === (string) ( $item['is_moderator'] ?? '' ) );
 				$payload[ $i ]['can_block'] = (
 					! $is_self
@@ -246,47 +164,21 @@ class PreviewProxyController {
 				);
 				$payload[ $i ]['can_unblock'] = ( ! $is_self && 0 === $follow_level );
 
-				// Both counts are WITHHELD rather than zeroed — by the privacy
-				// setting (who_can_see_followers / _followings) and by the
-				// module being off. Default to 0 so the two header buttons
-				// always bind a number instead of an undefined.
+				// Counts may be withheld by privacy settings or a disabled module; default to 0.
 				$followers  = isset( $item['followers_count'] ) ? (int) $item['followers_count'] : 0;
 				$followings = isset( $item['followings_count'] ) ? (int) $item['followings_count'] : 0;
 				$payload[ $i ]['followers_count']  = $followers;
 				$payload[ $i ]['followings_count'] = $followings;
 
-				// A count button binds ONE text, and a bare "0" says nothing —
-				// the same reason the byline above is joined here rather than
-				// split across two children sharing a cell (D69). The words are
-				// FluentCommunity's own: it says Followers and Followings.
 				/* translators: %d: number of people following this member */
 				$payload[ $i ]['followers_count_label'] = sprintf( _n( '%d Follower', '%d Followers', $followers, 'appza-core' ), $followers );
 				/* translators: %d: number of people this member follows */
 				$payload[ $i ]['followings_count_label'] = sprintf( _n( '%d Following', '%d Followings', $followings, 'appza-core' ), $followings );
 
-				// The edit form's email field. FluentCommunity changes an
-				// address inline for `edit_users`, or for the profile's owner on
-				// a site whose can_change_email privacy setting is yes — and
-				// fcom-mobile exposes no email route at all. It publishes the
-				// verdict as `can_change_email`; inverted here because a field
-				// binds `readonly`, and a binding cannot negate.
+				// fcom-mobile has no email route; inverted because a field binds `readonly` and bindings cannot negate.
 				$payload[ $i ]['email_readonly'] = empty( $item['can_change_email'] );
 
-				// The edit form's LAST card (design 40). The doc gates it on
-				// Privacy -> "Allow user to deactivate their account directly
-				// from their profile settings", and FluentCommunity's
-				// patchProfile enforces the same rule on the write:
-				// `can_deactive_account === 'yes' || isSiteAdmin()`.
-				//
-				// Published on the ROW rather than left to the bootstrap's
-				// settings block, because it is half viewer and half site —
-				// an admin may deactivate on a site where nobody else can —
-				// and a placement that gated on `settings.*` alone would show
-				// the card to every member on an admin's site.
-				//
-				// Only ever on your OWN profile: the form is only reachable
-				// there, but the flag says so anyway so a future placement
-				// cannot get it wrong.
+				// Mirrors FC patchProfile: can_deactive_account === 'yes' || isSiteAdmin(); own profile only.
 				$can_deactivate = false;
 				$utility        = '\\FluentCommunity\\App\\Functions\\Utility';
 				$fc_helper      = '\\FluentCommunity\\App\\Services\\Helper';
@@ -299,12 +191,7 @@ class PreviewProxyController {
 				$payload[ $i ]['can_deactivate_account'] = $can_deactivate
 					&& ! empty( $payload[ $i ]['is_self_profile'] );
 
-				// The ⋯ sheet's "Add to Space/Course" row (doc state 49:
-				// "only for Superadmin"). FluentCommunity agrees: the list
-				// the portal builds its picker from is behind AdminPolicy,
-				// which is isSiteAdmin(). D82 gated this on the moderator
-				// verdict, which offered the row to a community moderator
-				// who could never load its sheet.
+				// FC's space picker is behind AdminPolicy (isSiteAdmin), so gate on that rather than moderator.
 				$can_add_to_space = false;
 				if ( class_exists( $fc_helper ) && method_exists( $fc_helper, 'isSiteAdmin' ) ) {
 					$can_add_to_space = (bool) call_user_func( array( $fc_helper, 'isSiteAdmin' ), $viewer_id );
@@ -312,25 +199,10 @@ class PreviewProxyController {
 				$payload[ $i ]['can_add_to_space'] = $can_add_to_space
 					&& empty( $payload[ $i ]['is_self_profile'] );
 
-				// The profile's tab strip, which is FluentCommunity's OWN nav
-				// rather than our copy of it. `profile_navs` is already
-				// filtered per viewer — Spaces and Courses appear only with
-				// canViewUserSpaces, and Courses additionally needs the course
-				// module — so a hand-kept list here would be a second copy of
-				// a rule FluentCommunity changes at will.
-				//
-				// The renderer expands a strip from `tabs` on the AppZet or, as
-				// here, off the bound ROW. One profile row means one strip.
+				// profile_navs is already filtered per viewer by FC; don't hand-maintain the tab list.
 				$payload[ $i ]['tabs'] = $this->profile_tabs( $item );
 
-				// The About tab. FluentCommunity's portal is the reference —
-				// Noor has no design for it — and everything it shows is
-				// already on this row. Composed here for the same reason the
-				// byline is: a text child binds ONE string, and three children
-				// sharing a line is the mistake D69 unpicked.
-				//
-				// `created_at` has already been rewritten to a compact relative
-				// form by normalize_items ("8mo"); last_activity has not.
+				// created_at is already relative ("8mo") via normalize_items; last_activity is not.
 				$bits = array();
 				if ( ! empty( $item['created_at'] ) ) {
 					/* translators: %s: a relative time, e.g. "8mo" */
@@ -347,27 +219,14 @@ class PreviewProxyController {
 				}
 				$payload[ $i ]['about_stats'] = implode( ' · ', $bits );
 
-				// The About card's two iconed rows (designs 1 and 41), which
-				// replaced `about_stats` as what the card draws. The designs
-				// split the one line into rows and spell the units out —
-				// "Joined 9 months ago", "Last seen 10 minutes ago" — where
-				// the stats line compacted them to "8mo". `about_stats` is
-				// left published; nothing is lost by keeping it.
-				//
-				// JOINED reads `created_at_ts`, not `created_at`: the latter
-				// has already been rewritten to "8mo" by normalize_items by
-				// the time this runs.
+				// created_at_ts, because created_at has already been rewritten by normalize_items.
 				$joined_ts = isset( $item['created_at_ts'] ) ? (int) $item['created_at_ts'] : 0;
 				$payload[ $i ]['joined_label'] = $joined_ts > 0
 					/* translators: %s: a spelled-out age, e.g. "9 months" */
 					? sprintf( __( 'Joined %s ago', 'appza-core' ), $this->long_age( $joined_ts ) )
 					: '';
 
-				// LAST SEEN only exists when FluentCommunity published
-				// `last_activity`, and it publishes it only when Privacy ->
-				// "show last activity" is on. So gating the row on this label
-				// existing IS the doc's condition, read at the source rather
-				// than re-implemented.
+				// FC publishes last_activity only when its privacy setting allows, so this label doubles as the gate.
 				$last_ts = ! empty( $item['last_activity'] ) && is_string( $item['last_activity'] )
 					? strtotime( $item['last_activity'] . ' UTC' )
 					: false;
@@ -376,26 +235,18 @@ class PreviewProxyController {
 					? sprintf( __( 'Last seen %s ago', 'appza-core' ), $this->long_age( (int) $last_ts ) )
 					: '';
 
-				// The Additional information cards, READ-ONLY (designs 1 and
-				// 41). Built from FluentCommunity Pro's own grouped key, so
-				// its per-field privacy rules have already run — a card here
-				// only ever holds fields THIS viewer may see.
+				// FC Pro's per-field privacy rules have already been applied to custom_field_groups.
 				$payload[ $i ]['custom_field_view'] = $this->custom_field_view(
 					isset( $item['custom_field_groups'] ) && is_array( $item['custom_field_groups'] )
 						? $item['custom_field_groups']
 						: array()
 				);
 
-				// The Social Link card, READ-ONLY. The member's handles, each
-				// with its provider's glyph and a link to the full profile —
-				// the view that the edit form's prefix and field compose.
 				$payload[ $i ]['social_link_view'] = $this->social_link_view(
 					isset( $item['social_links'] ) ? (array) $item['social_links'] : array()
 				);
 
-				// Social links arrive as an OBJECT keyed by provider, and a
-				// variadic strip expands an ARRAY. Empty on this box, so the
-				// strip simply draws nothing.
+				// social_links is an object keyed by provider; a strip expands an array.
 				$socials = array();
 				$raw_socials = isset( $item['social_links'] ) ? (array) $item['social_links'] : array();
 				foreach ( $raw_socials as $provider => $url ) {
@@ -410,131 +261,51 @@ class PreviewProxyController {
 				}
 				$payload[ $i ]['social_link_list'] = $socials;
 
-				// The EDIT form's Social Links card (design 40), which is a
-				// different question from the list above: that one is what
-				// this member has FILLED IN, this one is every provider the
-				// site offers, whether filled in or not.
-				//
-				// Joined here because neither half is any use alone. The
-				// providers are FluentCommunity's — title, the domain it
-				// draws as a grey prefix, and its own placeholder — and the
-				// values are the member's, stored as bare HANDLES keyed by
-				// provider rather than as URLs. A card built from either
-				// side alone would draw empty rows or lose the labels.
+				// Every provider the site offers, joined with the member's stored handles (bare handles, not URLs).
 				$payload[ $i ]['social_link_fields'] = $this->social_link_fields( $raw_socials );
 				$payload[ $i ]['has_social_links']   = ! empty( $payload[ $i ]['social_link_fields'] );
 
-				// ---------------------------------------------------------
-				// The three the header needs that NO endpoint publishes.
-				// ---------------------------------------------------------
-				//
-				// Everything else on this row arrives intact: fcom-mobile's
-				// /members/profile asks FluentCommunity's own
-				// `/profile/{username}` and passes `data.profile` through
-				// WHOLE, so every field FC Pro appends through the
-				// `fluent_community/profile_view_data` filter is already
-				// here — `custom_field_groups`, `scheduled_posts_count`,
-				// `followers_count`, `followings_count`, `follow`.
-				//
-				// These three are not, because no filter publishes them.
-
-				// 1. The badge chips (designs 1 + 41). The row carries
-				// `badge_slugs`; the DEFINITIONS live in an option the
-				// portal reads separately and resolves client-side. The
-				// appended `badge` attribute on XProfile is a filter
-				// nothing hooks, so it is always null — `meta.badge_slug`
-				// through `user_badges` is the portal's real path, and the
-				// All Members card already reads it the same way.
-				//
-				// The card shows the FIRST badge; the profile shows them
-				// ALL, so this is a list. `has_badges` is the gate, because
-				// a placement's visible_when is a truthiness test on a path
-				// and "a non-empty array" is not one (P159).
+				// Badge definitions live in an option (XProfile's `badge` attribute is always null). has_badges exists
+				// because visible_when cannot test for a non-empty array.
 				$badges = $this->resolve_badges( $item );
 				$payload[ $i ]['badges']     = $badges;
 				$payload[ $i ]['has_badges'] = ! empty( $badges );
 
-				// The "@syed" line, which designs 1 and 41 draw UNDER the
-				// blue subtitle as its own row. `profile_byline` above is
-				// the old one-line form ("@raju · 24 points") and is left
-				// alone — the About card still composes from it. Same key
-				// the All Members card uses, so one spelling serves both.
 				$payload[ $i ]['username_at'] = ! empty( $item['username'] )
 					? '@' . $item['username']
 					: '';
 
-				// The own-profile ⋯ menu's Moderation row (design 6), which
-				// the doc gates twice over: "this option will come if
-				// settings page content moderation is enable. This option
-				// will come only for super admins."
-				//
-				// Published as ONE boolean because a menu row's
-				// `visible_when` resolves only `data.*` paths — `settings.*`
-				// reads as undefined there, which is indistinguishable from
-				// false, so the site's half of the rule has to be answered
-				// here rather than in the catalog. A placement's gate is the
-				// one that can read settings; a menu row's cannot (P159).
-				//
-				// `viewer_is_moderator` is already on the row above, decided
-				// while the viewer is still the viewer (P158).
+				// A menu row's visible_when cannot read settings.*, so the site half of the gate is resolved here.
 				$moderation_on = false;
 				$helper        = '\\FluentCommunity\\App\\Services\\Helper';
 				if ( class_exists( $helper ) && method_exists( $helper, 'isFeatureEnabled' ) ) {
 					$moderation_on = (bool) call_user_func( array( $helper, 'isFeatureEnabled' ), 'content_moderation' );
 				}
-				// Read from $payload, NOT $item: `viewer_is_moderator` is
-				// derived earlier in this same loop and written to the
-				// payload row. $item is the untouched upstream row and has
-				// never carried it, so reading it there is a silent false.
+				// Read from $payload: viewer_is_moderator was derived above and is not on $item.
 				$payload[ $i ]['can_moderate'] = $moderation_on
 					&& ! empty( $payload[ $i ]['viewer_is_moderator'] );
 
-				// 2. The third header count (design 1: "1 Blocked").
-				// FluentCommunity Pro's FollowHandler publishes followers
-				// and followings and stops there. Blocked is the same table
-				// at level 0 — the people THIS profile has blocked, which
-				// is what its own Blocked tab lists — so it is the profile
-				// owner's fact, not the viewer's, and is safe to count here
-				// where the viewer is only resolved from the auth header.
+				// FC Pro publishes no blocked count; it is this profile's follows at level 0.
 				$blocked = $this->blocked_count( $profile_user_id );
 				$payload[ $i ]['blocked_count'] = $blocked;
 				/* translators: %d: how many members this member has blocked */
 				$payload[ $i ]['blocked_count_label'] = sprintf( _n( '%d Blocked', '%d Blocked', $blocked, 'appza-core' ), $blocked );
 
-				// "You have 2 scheduled posts" (design 65). FluentCommunity
-				// Pro's getScheduledPost adds the count only when there is
-				// at least one AND the viewer is the owner or a site admin,
-				// so its absence is the banner's whole gate — nothing is
-				// published when there is no count, and nothing is invented.
+				// FC Pro adds scheduled_posts_count only when > 0 and the viewer is the owner or a site admin.
 				if ( isset( $item['scheduled_posts_count'] ) && (int) $item['scheduled_posts_count'] > 0 ) {
 					$scheduled = (int) $item['scheduled_posts_count'];
 					/* translators: %d: how many posts the member has scheduled */
 					$payload[ $i ]['scheduled_posts_label'] = sprintf( _n( 'You have %d scheduled post', 'You have %d scheduled posts', $scheduled, 'appza-core' ), $scheduled );
 				}
 
-				// 3. The level bar (designs 1 + 41: "🏆 42 · Level 3 ·
-				// 23 points to level up"). `total_points` is on the row;
-				// the level it lands in, and the distance to the next one,
-				// are the leaderboard's arithmetic. /leaderboard/me already
-				// does this — but only ever for the VIEWER, and this bar
-				// belongs to whoever's profile is open.
+				// /leaderboard/me only answers for the viewer; this bar belongs to the profile owner.
 				foreach ( $this->level_facts( $points ) as $key => $value ) {
 					$payload[ $i ][ $key ] = $value;
 				}
 			}
 		}
 
-		// The profile's SPACES tab: the ⋮ on each card (designs 57, 58).
-		//
-		// "Only super admin will get 3 dots on the spaces." FluentCommunity
-		// lets any space admin remove a member, but the doc narrows it and
-		// the doc wins — isSiteAdmin(), the same verdict the Add to Space
-		// row uses. Never on your own profile: the dialog says "remove this
-		// MEMBER", and leaving a space is a different act with its own
-		// button on the space.
-		//
-		// `profile_member_id` rides on the row because the card is a SPACE
-		// row, and the removal needs to know whose profile it is on.
+		// Spaces-tab ⋮: site admins only, never on your own profile.
 		if ( 'fc-member-spaces' === $ds_slug && is_array( $payload ) ) {
 			$params_decoded = json_decode( $params_json, true );
 			$profile_member = is_array( $params_decoded ) ? (int) ( $params_decoded['member_id'] ?? 0 ) : 0;
@@ -553,19 +324,8 @@ class PreviewProxyController {
 			}
 		}
 
-		// The profile's COMMENTS tab. Two derivations, both so a row can
-		// be a card:
-		//
-		// `comment_context` — the line under the comment saying which post
-		// it was left on. FluentCommunity does not require a post title
-		// and most posts here have none, so it falls back to the post's
-		// own text, trimmed.
-		//
-		// `slug` — the POST's slug, promoted to the top level. post-detail
-		// resolves its row from `route.post_slug`, which reads the item the
-		// tap passes as context; a comment has no slug of its own, so
-		// without this the tap would arrive at post-detail with nothing to
-		// look up.
+		// FC posts often have no title, so comment_context falls back to the body. The post's slug is promoted
+		// because post-detail resolves from it and a comment has no slug of its own.
 		if ( 'fc-member-comments' === $ds_slug && is_array( $payload ) ) {
 			$comment_avatars = array();
 			foreach ( $payload as $i => $item ) {
@@ -583,22 +343,12 @@ class PreviewProxyController {
 				}
 				/* translators: %s: the title of the post a comment was left on */
 				$payload[ $i ]['comment_context'] = sprintf( __( 'on %s', 'appza-core' ), $title );
-				// Design 62 draws the title on its own line, bold, with no
-				// "on" in front of it.
 				$payload[ $i ]['post_title'] = $title;
 
-				// The trash icon (designs 62 to 64). The doc puts it on your
-				// OWN profile only, and on your own profile every comment is
-				// yours — so "this comment is the viewer's" is that rule
-				// exactly, and it is also the rule FluentCommunity applies
-				// to a delete by anyone who is not a moderator.
 				$comment_user = (int) ( $item['user_id'] ?? 0 );
 				$payload[ $i ]['can_delete'] = $viewer_id > 0 && $comment_user === $viewer_id;
 
-				// The small avatar at the top of the card: the commenter,
-				// who is the profile's member. A comment row carries only
-				// the POST author's xprofile, so it is looked up — once per
-				// member, since every row on this tab has the same one.
+				// Comment rows carry only the post author's xprofile; look up the commenter once per member.
 				if ( $comment_user > 0 && ! array_key_exists( $comment_user, $comment_avatars ) ) {
 					$comment_avatars[ $comment_user ] = '';
 					if ( class_exists( '\\FluentCommunity\\App\\Models\\XProfile' ) ) {
@@ -616,33 +366,8 @@ class PreviewProxyController {
 			}
 		}
 
-		// The two follow lists (2026-09-02).
-		//
-		// FluentCommunity answers both with a FOLLOW row — the pivot —
-		// and hangs the person off a different key in each: `follower` on
-		// /members/followers, `followed` on /members/followings. A card
-		// binds a PATH, not a row (P138), so without flattening them here
-		// the two lists would need two identical cards differing in one
-		// word, and every later change would have to be made twice.
-		//
-		// The derived fields, all of them what the portal draws:
-		//
-		// `profile_byline` — "Joined 8mo ago", plus "· Last seen: 17h ago"
-		// when FC has a last_activity. One string because a row binds one
-		// text, which is the same reason the profile header's byline is
-		// joined in the proxy rather than split across two children.
-		//
-		// `is_following` / `is_self` — the two gates the Follow button
-		// needs. FC ships `follow` as the LEVEL (null when not following,
-		// 0 when blocked, >0 when following), which no visible_when can
-		// compare usefully, and a viewer's own row carries no button at
-		// all — raju appears in demo_student's followers with none.
-		//
-		// `fc-blocked-users` joined them on 2026-09-16 (doc states 34-39).
-		// FluentCommunity Pro's getBlockedUsers returns the SAME pivot —
-		// `Follow::where('level', 0)->with('followed')` — so the person is
-		// under `followed` exactly as on a followings row, and the one card
-		// serves all three lists rather than a third near-copy of it.
+		// FC returns follow pivots with the person under `follower` or `followed` (blocked list included);
+		// flatten so one card serves all three lists. FC's `follow` is a level (null/0 blocked/>0).
 		if ( in_array( $ds_slug, array( 'fc-member-followers', 'fc-member-followings', 'fc-blocked-users' ), true ) && is_array( $payload ) ) {
 			$person_key = 'fc-member-followers' === $ds_slug ? 'follower' : 'followed';
 			foreach ( $payload as $i => $item ) {
@@ -662,10 +387,6 @@ class PreviewProxyController {
 					}
 				}
 
-				// "@name" as ONE string. fc-member-card does this with a
-				// bespoke renderer transform keyed on its own slug; here
-				// the flattening already runs, so the prefix costs a line
-				// rather than a special case in the render path.
 				if ( ! empty( $person['username'] ) ) {
 					$payload[ $i ]['username_at'] = '@' . $person['username'];
 				}
@@ -688,20 +409,7 @@ class PreviewProxyController {
 			}
 		}
 
-		// The Scheduled Posts page (doc state 66).
-		//
-		// FluentCommunity nests the author under `xprofile` and the space
-		// under `space`, and a card child binds one flat string — so both
-		// are lifted here, as the follow lists lift their person.
-		//
-		// `scheduled_for_label` — "Scheduled for Sep 26, 2026, 3:45 PM".
-		// `scheduled_at` is the SITE's wall-clock (Pro formats it in
-		// wp_timezone()), so it is read in that zone and printed as is, not
-		// shifted into the device's.
-		//
-		// `excerpt` — the body as plain text, from the raw `message`:
-		// `message_rendered` has already been through sanitize_rich_text
-		// above, and the card draws one line of words, not markup.
+		// scheduled_at is the site's wall-clock (wp_timezone()), so it is printed as is, not shifted.
 		if ( 'fc-scheduled-posts' === $ds_slug && is_array( $payload ) ) {
 			foreach ( $payload as $i => $item ) {
 				if ( ! is_array( $item ) ) {
@@ -731,21 +439,8 @@ class PreviewProxyController {
 			}
 		}
 
-		// A DM that does not exist yet (2026-09-02).
-		//
-		// FluentCommunity cannot open an empty one-to-one thread:
-		// `POST /chat/threads` validates `message` as REQUIRED and creates
-		// the thread WITH its first message. Its own portal does not
-		// pretend otherwise — the profile's Message button links to
-		// `/portal/chat?user_id=N`, an INTENT rather than a thread.
-		//
-		// So the conversation screen has to be able to draw a person it
-		// has no thread for. Asked for a thread with an `intent_user_id`
-		// and no id, this answers with the same row shape the real
-		// endpoint returns, built from that member's profile: the appbar
-		// gets a name and a face, `can_send_message` is true so the
-		// composer exists, and `id` is 0 — which is what the send handler
-		// reads to know it must create the thread rather than post to it.
+		// FC cannot create an empty DM thread (message is required), so synthesize a thread row from the intent
+		// user's profile. id 0 tells the send handler to create the thread.
 		if ( 'fc-chat-thread' === $ds_slug && empty( $payload ) ) {
 			$decoded_params = json_decode( $params_json, true );
 			$intent_user_id = is_array( $decoded_params ) && isset( $decoded_params['intent_user_id'] )
@@ -775,8 +470,6 @@ class PreviewProxyController {
 							'member_count'            => 2,
 							'is_active_now'           => false,
 							'can_view_members'        => false,
-							// The whole point: a composer on a conversation
-							// that does not exist yet.
 							'can_send_message'        => true,
 							'can_delete_any_messages' => false,
 							'can_leave'               => false,
@@ -789,50 +482,16 @@ class PreviewProxyController {
 			}
 		}
 
-		// The comment thread under post detail (the 28 FeedPostDetails
-		// designs). Four derivations, all of them shape rather than style:
-		//
-		// `children` — FluentCommunity answers /feeds/{id}/comments with a
-		// FLAT list carrying `parent_id`, and nothing threads it. The real
-		// data nests arbitrarily deep (a reply to a reply to a reply), but
-		// FC's own portal and Noor's designs 13 and 21 both draw exactly
-		// TWO levels, so every descendant is flattened onto its top-level
-		// ancestor rather than indented one step further per generation.
-		// An indent staircase is what a depth-faithful tree would give,
-		// and no design has one.
-		//
-		// `reply_to_name` — the blue name in front of a reply's body. It
-		// is the author of the comment being replied to, NOT of the thread
-		// root, which is the difference that makes a flattened list still
-		// readable. FluentCommunity stores it nowhere: a reply's
-		// message_rendered is the bare body, so without this the reply
-		// reads as a non-sequitur.
-		//
-		// `reply_count_label` — "1 Reply" / "2 Reply". Not pluralised, on
-		// purpose: designs 13 and 21 both write "Reply" singular and the
-		// designs win.
-		//
-		// `sort_*` — the sort sheet has four orders and FluentCommunity's
-		// endpoint accepts none of them (getComments is hardcoded to
-		// created_at ASC), so the ordering happens client-side and these
-		// are the keys it orders on. `sort_time` is the epoch of the
-		// ORIGINAL created_at, which the relative-time pass above would
-		// otherwise have destroyed.
-		// A lesson's discussion (Courses chunk 6) is the same thread over
-		// the same route; its count is plural ("2 Replies" — the Courses
-		// doc's open item 9), where the post-detail designs write "Reply".
+		// FC returns comments flat with parent_id; thread them to two levels, as its portal does. getComments is
+		// hardcoded to created_at ASC, so sort keys are added for client-side ordering. Post detail writes
+		// "N Reply" singular on purpose (designs); lesson comments pluralise.
 		if ( 'fc-post-comments' === $ds_slug && is_array( $payload ) ) {
 			$payload = $this->thread_comments( $payload );
 		} elseif ( 'fc-lesson-comments' === $ds_slug && is_array( $payload ) ) {
 			$payload = $this->thread_comments( $payload, true );
 		}
 
-		// Feed links carry their icon in one of THREE fields — an emoji,
-		// an uploaded image URL, or raw inline SVG markup — and a chip
-		// can bind one image source, not three. Resolve them to a single
-		// `link_icon_url` here, turning the SVG into a data URI so the
-		// same <img> draws it; the emoji stays its own field because it
-		// is text, not an image.
+		// Link icons arrive as emoji, image URL or inline SVG; resolve to one link_icon_url (SVG as a data URI).
 		if ( 'fc-feed-links' === $ds_slug && is_array( $payload ) ) {
 			foreach ( $payload as $i => $item ) {
 				if ( ! is_array( $item ) ) {
@@ -850,13 +509,7 @@ class PreviewProxyController {
 		return rest_ensure_response( $this->rewrite_urls_for_current_host( $payload ) );
 	}
 
-	/**
-	 * The DataSource's declared cache_ttl, in seconds.
-	 *
-	 * An explicit 0 means "do not cache" and is honoured as such. A
-	 * missing / non-numeric / negative value falls back to CACHE_TTL, so
-	 * a source that never thought about caching behaves as it always has.
-	 */
+	/** An explicit 0 means do not cache; missing, non-numeric or negative falls back to CACHE_TTL. */
 	protected function resolve_cache_ttl( $template_slug, $ds_slug ) {
 		$snapshot = $this->snapshots->find_by_template_slug( $template_slug );
 		if ( ! $snapshot || ! is_array( $snapshot['snapshot_blob'] ) ) {
@@ -878,30 +531,22 @@ class PreviewProxyController {
 		return self::CACHE_TTL;
 	}
 
-	/** The viewer's cache bucket, so a write can invalidate the reads it affects. */
 	public static function auth_bucket_for( \WP_REST_Request $request ) {
 		return self::bucket_for_user( get_current_user_id() );
 	}
 
-	/** Cache bucket for a verified user id: `u<ID>`, or `anon` for a guest. */
 	public static function bucket_for_user( $user_id ) {
 		$user_id = (int) $user_id;
 		return $user_id > 0 ? 'u' . $user_id : 'anon';
 	}
 
-	/** Current cache generation for a viewer bucket. */
 	public static function generation_for( $auth_bucket ) {
 		return (int) get_option( 'appza_preview_gen_' . $auth_bucket, 0 );
 	}
 
 	/**
-	 * Invalidate every cached read held for one viewer.
-	 *
-	 * Called after that viewer writes something through fcom-mobile. The
-	 * motivating case: the reaction toggle's DIRECTION is computed from
-	 * the row the client is holding, so a stale row does not merely look
-	 * wrong — the next tap sends the OPPOSITE of what the user intended
-	 * and silently removes a like they meant to add.
+	 * Invalidate a viewer's cached reads after a write. A stale row makes the next reaction toggle send
+	 * the opposite direction and silently undo the user's like.
 	 */
 	public static function bump_generation( $auth_bucket ) {
 		$option = 'appza_preview_gen_' . $auth_bucket;
@@ -917,17 +562,7 @@ class PreviewProxyController {
 		return null;
 	}
 
-	/**
-	 * An age spelled out the way the About card's designs write it — "9
-	 * months", "10 minutes" — where relative_time() writes "9mo".
-	 *
-	 * Same boundaries as relative_time(), and deliberately so: a month is
-	 * 30 days there, so it is 30 days here, and the header's byline and
-	 * this card cannot disagree about how long ago the same moment was.
-	 *
-	 * @param int $timestamp Unix time of the moment.
-	 * @return string
-	 */
+	/** "9 months" rather than "9mo"; same boundaries as relative_time() so the two never disagree. */
 	protected function long_age( $timestamp ) {
 		$diff = max( 0, time() - (int) $timestamp );
 
@@ -952,20 +587,8 @@ class PreviewProxyController {
 	}
 
 	/**
-	 * FluentCommunity Pro's custom-field groups, shaped for READING.
+	 * FC Pro custom-field groups for display: empty fields/groups dropped, values formatted, urls marked.
 	 *
-	 * Three things the edit form never needed:
-	 *
-	 *   - Empty fields are DROPPED, and a group with none left is dropped
-	 *     with them. A profile card listing a dozen labels over nothing is
-	 *     noise; the designs draw only answered fields.
-	 *   - Values are FORMATTED. A date is stored as "2026-06-01" and drawn
-	 *     as "Jun 1, 2026"; a multiselect is stored as option keys and
-	 *     drawn as their LABELS joined; a select or radio is its label.
-	 *   - A url is marked, so the row can be a link — design 1 draws it
-	 *     blue.
-	 *
-	 * @param array $groups `custom_field_groups` from the profile row.
 	 * @return array<int,array<string,mixed>>
 	 */
 	protected function custom_field_view( array $groups ) {
@@ -1025,16 +648,8 @@ class PreviewProxyController {
 	}
 
 	/**
-	 * The member's social handles, shaped for READING — one card with a
-	 * row per filled-in provider (designs 1 and 41).
+	 * Filled-in social handles as display rows. Glyphs are ionicon names, to avoid injecting FC's raw SVG.
 	 *
-	 * The glyph is an IONICON NAME, not FluentCommunity's SVG. Pro ships
-	 * each provider's icon as raw SVG markup, and drawing that means
-	 * injecting HTML; ionicons carries a logo for every provider the
-	 * defaults enable, and a name travels through the catalog like any
-	 * other icon. A provider with no mapped logo draws a plain link glyph.
-	 *
-	 * @param array $stored The member's `social_links` meta.
 	 * @return array<int,array<string,mixed>>
 	 */
 	protected function social_link_view( array $stored ) {
@@ -1061,9 +676,7 @@ class PreviewProxyController {
 				continue;
 			}
 			$handle = trim( (string) $handle );
-			// Only providers the site still has ENABLED. A handle left over
-			// from a provider an admin has since switched off is not a link
-			// the community offers any more.
+			// Skip providers the site has since disabled.
 			if ( '' === $handle || ! isset( $providers[ $key ] ) ) {
 				continue;
 			}
@@ -1089,25 +702,8 @@ class PreviewProxyController {
 	}
 
 	/**
-	 * Every social provider the site has ENABLED, with this member's
-	 * handle for it — the edit form's Social Links card (design 40).
+	 * Every enabled provider joined with the member's stored handle (a bare handle, as updateProfile stores it).
 	 *
-	 * FluentCommunity keeps the two apart: the providers are a site
-	 * setting (`profile_link_providers`, read through
-	 * `ProfileHelper::socialLinkProviders`) and the handles are profile
-	 * meta. The card needs both on every row, so they are joined here
-	 * rather than in two fetches the form would have to reconcile.
-	 *
-	 * `enabledOnly` is the doc's condition for this card: "Comes if
-	 * settings -> Feature & Addons -> Profile Social Media Links is enable
-	 * & the options will also come based on the enable options." An empty
-	 * list is the honest answer for a site that has enabled none, and
-	 * `has_social_links` is what hides the card.
-	 *
-	 * The value is a bare HANDLE, not a URL — that is how
-	 * `updateProfile` stores it, and the domain beside it is a label.
-	 *
-	 * @param array $stored  The member's `social_links` meta.
 	 * @return array<int,array<string,string>>
 	 */
 	protected function social_link_fields( array $stored ) {
@@ -1134,8 +730,6 @@ class PreviewProxyController {
 			$fields[] = array(
 				'key'         => $key,
 				'label'       => isset( $provider['title'] ) ? (string) $provider['title'] : $key,
-				// Drawn as the grey prefix box. FluentCommunity calls it
-				// the domain and never stores it with the handle.
 				'domain'      => isset( $provider['domain'] ) ? (string) $provider['domain'] : '',
 				'placeholder' => isset( $provider['placeholder'] ) ? (string) $provider['placeholder'] : '',
 				'value'       => $value,
@@ -1146,19 +740,9 @@ class PreviewProxyController {
 	}
 
 	/**
-	 * Every badge this member wears that is still DEFINED, resolved from
-	 * the slugs on the row through FluentCommunity Pro's definitions.
+	 * Resolve badge slugs against FC Pro's `user_badges` option; no endpoint returns resolved badges.
+	 * meta.badge_slug is the fallback because the members endpoint publishes only that.
 	 *
-	 * The portal reads `meta.badge_slug` against the `user_badges` option
-	 * and resolves the pair in the browser; there is no endpoint that
-	 * returns a resolved badge. A slug whose definition has since been
-	 * deleted is skipped rather than drawn as an empty chip.
-	 *
-	 * `badge_slugs` is on the row already (FluentCommunity puts it there);
-	 * `meta.badge_slug` is the same list one level down, and is read as a
-	 * fallback because the members endpoint publishes only the latter.
-	 *
-	 * @param array $item One profile row.
 	 * @return array<int,array<string,string>>
 	 */
 	protected function resolve_badges( $item ) {
@@ -1190,31 +774,11 @@ class PreviewProxyController {
 				'label' => $label,
 				'emoji' => $emoji,
 				'logo'  => isset( $config['logo'] ) ? (string) $config['logo'] : '',
-				// The chip draws ONE string, so the emoji is joined to the
-				// title here rather than in two children sharing a cell —
-				// the mistake D69 unpicked on the post card's byline.
-				//
-				// A badge configured with a LOGO instead of an emoji draws
-				// its title alone: an image cannot be inlined into a text
-				// chip, and giving the chip an icon slot would mean a
-				// second child per badge for a case no badge on this box
-				// uses. Stated rather than worked around.
-				//
-				// "Show Label on Badge" off is the portal's `user_icon_only`:
-				// the emoji alone. With no emoji there is nothing else a
-				// text chip can draw, so the title stays.
+				// A logo-only badge draws its title alone; show_label = no draws the emoji alone.
 				'chip_label' => ( isset( $badge['show_label'] ) && 'no' === $badge['show_label'] && '' !== $emoji )
 					? $emoji
 					: trim( $emoji . ' ' . $label ),
-				// The chip's own colours, which the designs give each badge
-				// individually rather than by a shared token.
-				//
-				// FluentCommunity Pro stores them at the badge's TOP level as
-				// `color` and `background_color` (UserBadgeController's
-				// santizeBadge; the portal paints `color` on the border too).
-				// This read `config.text_color` / `config.bg_color` until
-				// 2026-09-17 — keys Pro never writes, so every chip drew
-				// uncoloured. Found the first time a badge was defined here.
+				// FC Pro stores colours at the badge's top level (`color`, `background_color`), not in config.
 				'text_color' => isset( $badge['color'] ) && '' !== $badge['color']
 					? (string) $badge['color']
 					: ( isset( $config['text_color'] ) ? (string) $config['text_color'] : '' ),
@@ -1227,12 +791,7 @@ class PreviewProxyController {
 		return $badges;
 	}
 
-	/**
-	 * FluentCommunity Pro's badge definitions, keyed by slug. Absent
-	 * option, absent Pro, or a non-array value all mean "no badges".
-	 *
-	 * @return array<string,mixed>
-	 */
+	/** @return array<string,mixed> */
 	protected function badge_definitions() {
 		$utility = '\\FluentCommunity\\App\\Functions\\Utility';
 		if ( ! class_exists( $utility ) ) {
@@ -1243,21 +802,8 @@ class PreviewProxyController {
 	}
 
 	/**
-	 * How many members this member has blocked.
-	 *
-	 * FluentCommunity keeps blocks in the follows table at level 0, which
-	 * is how `/profile/{username}/blocked-users` lists them. Counted
-	 * straight off the model rather than by asking that route, because the
-	 * header needs a NUMBER and the route returns a page of rows — and
-	 * because a second rest_do_request in this process is the trap P134
-	 * names.
-	 *
-	 * `whereHas('followed')` mirrors the count FollowHandler uses for the
-	 * other two, so a block on a user who has since been deleted does not
-	 * inflate the total.
-	 *
-	 * @param int $user_id The profile owner.
-	 * @return int
+	 * Blocks are follows at level 0, counted off the model rather than a nested rest_do_request.
+	 * whereHas('followed') matches FollowHandler so deleted users are not counted.
 	 */
 	protected function blocked_count( $user_id ) {
 		$user_id = (int) $user_id;
@@ -1278,26 +824,15 @@ class PreviewProxyController {
 			}
 			return (int) $xprofile->follows()->where( 'level', 0 )->whereHas( 'followed' )->count();
 		} catch ( \Throwable $e ) {
-			// FollowController is Pro; on a site without it the relation
-			// is absent and a zero is the honest answer, not a 500.
+			// The follows relation is Pro-only.
 			return 0;
 		}
 	}
 
 	/**
-	 * The level bar's numbers for a given points total.
+	 * Same arithmetic as /leaderboard/me, but for the profile owner. Every key is always returned so a
+	 * binding never hits an absent path.
 	 *
-	 * The same arithmetic `/leaderboard/me` does, which is the portal's:
-	 * the next level starts one point past this one's ceiling, and the
-	 * sentence is suppressed at the top level where that ceiling is ten
-	 * billion. Done here because /leaderboard/me only ever answers for the
-	 * VIEWER, and this bar belongs to whoever's profile is open.
-	 *
-	 * Every key is returned even when the module is off, so a field
-	 * mapping never binds a path that is sometimes absent — the labels are
-	 * simply empty and `has_level_bar` gates the placement.
-	 *
-	 * @param int $points The profile owner's points total.
 	 * @return array<string,mixed>
 	 */
 	protected function level_facts( $points ) {
@@ -1313,9 +848,7 @@ class PreviewProxyController {
 			'is_max_level'       => false,
 		);
 
-		// The same class, feature gate and methods /leaderboard/me uses.
-		// The bar is the leaderboard's, so it goes when the leaderboard
-		// module does — FluentCommunity's portal hides it the same way.
+		// Hidden when the leaderboard module is off, as in FC's portal.
 		$helper = '\\FluentCommunityPro\\App\\Modules\\LeaderBoard\\Services\\LeaderBoardHelper';
 		$fc     = '\\FluentCommunity\\App\\Services\\Helper';
 		if ( ! class_exists( $helper ) || ! class_exists( $fc ) ) {
@@ -1331,10 +864,7 @@ class PreviewProxyController {
 				return $none;
 			}
 
-			// getDynamicLevels merges saved settings over defaults with
-			// wp_parse_args, which preserves KEY order rather than point
-			// order — so "the last level" has to be sorted for, not
-			// assumed. Same sort the levels card applies.
+			// getDynamicLevels keeps key order, not point order, so sort before taking the last level.
 			$levels = (array) call_user_func( array( $helper, 'getDynamicLevels' ) );
 			$levels = array_values( $levels );
 			usort(
@@ -1368,14 +898,8 @@ class PreviewProxyController {
 	}
 
 	/**
-	 * FluentCommunity's profile navs, as the tab strip's entries.
+	 * FC profile_navs mapped to our tab values; unknown slugs pass through.
 	 *
-	 * Their slugs are the portal's route names; ours are the values the
-	 * placements gate on. Anything unrecognised is passed through with its
-	 * slug as the value, so a nav FC adds later draws as a tab rather than
-	 * vanishing — it will simply have no placement answering it yet.
-	 *
-	 * @param array $item One profile row.
 	 * @return array<int,array<string,string>>
 	 */
 	protected function profile_tabs( $item ) {
@@ -1435,19 +959,11 @@ class PreviewProxyController {
 		if ( '' !== $endpoint && '/' === $endpoint[0] && 0 === strpos( $endpoint, '/wp-json/' ) ) {
 			$route = substr( $endpoint, strlen( '/wp-json' ) );
 			$rest_request = new \WP_REST_Request( 'GET', $route );
-			// Set as BOTH query params + generic params so downstream
-			// handlers can read via either get_query_params() or get_params().
 			foreach ( $params as $k => $v ) {
 				$rest_request->set_param( $k, $v );
 			}
 			$rest_request->set_query_params( $params );
-			// FluentCommunity's Model::getPerPage() reads $_REQUEST['per_page']
-			// directly — it bypasses the WP_REST_Request. Same story for its
-			// SpaceController's search / status / sort switches on some
-			// endpoints. Inject the forwarded params into $_REQUEST/$_GET for
-			// the duration of the sub-request so paginate() honors what the
-			// client actually asked for (else it silently caps at 15/page).
-			// Restore afterward so the outer request isn't polluted.
+			// FC reads $_REQUEST/$_GET directly (e.g. per_page), so mirror the params there, then restore.
 			$prev_request_super = $_REQUEST;
 			$prev_get_super     = $_GET;
 			foreach ( $params as $k => $v ) {
@@ -1471,7 +987,6 @@ class PreviewProxyController {
 			if ( ! is_array( $decoded ) ) {
 				return null;
 			}
-			// Some upstreams wrap items: try common shapes.
 			if ( isset( $decoded['data'] ) && is_array( $decoded['data'] ) ) {
 				return $decoded['data'];
 			}
@@ -1510,7 +1025,6 @@ class PreviewProxyController {
 		if ( ! is_array( $decoded ) ) {
 			return null;
 		}
-		// Some upstreams wrap items: try common shapes.
 		if ( isset( $decoded['data'] ) && is_array( $decoded['data'] ) ) {
 			return $decoded['data'];
 		}
@@ -1520,24 +1034,7 @@ class PreviewProxyController {
 		return $decoded;
 	}
 
-	/**
-	 * Normalize each item so text bindings render cleanly.
-	 * - Strips HTML from `message_rendered` (rendered arrives as
-	 *   `<p>...</p>` from FluentCommunity; text bindings would otherwise
-	 *   show the literal tags).
-	 * - Converts `created_at` datetime string to a compact relative form
-	 *   (`5m`, `2h`, `3d`) so the text bindings don't blow up the header
-	 *   row width.
-	 *
-	 * Applied to both fixture and real payloads at handle() time, so the
-	 * fixture shape stays honest to the real API + demo/real render the
-	 * same way.
-	 */
-	/**
-	 * Lazily-built documents controller, reused for its file derivation so
-	 * the feed card and the DOCUMENTS tab cannot drift apart on what a
-	 * file row is.
-	 */
+	/** Shared with the DOCUMENTS tab so both derive file rows the same way. */
 	protected function documents_controller() {
 		if ( null === $this->documents ) {
 			$this->documents = new FluentCommunityDocumentsController();
@@ -1549,11 +1046,7 @@ class PreviewProxyController {
 		if ( ! is_array( $items ) ) {
 			return $items;
 		}
-		// Batch-fetch the viewer's own reactions for the returned feed_ids
-		// so each item can carry a `my_reactions` array without an
-		// per-item query. FC eager-loads `type='like'` on the feed listing
-		// but bookmark reactions are stored in the same table, so this is
-		// the only place the renderer can learn bookmark state.
+		// FC eager-loads only type='like'; bookmarks share the table, so fetch the viewer's reactions here.
 		$my_reactions_by_feed = array();
 		$my_votes_by_feed     = array();
 		if ( $viewer_id > 0 ) {
@@ -1581,20 +1074,7 @@ class PreviewProxyController {
 						}
 					}
 				}
-				// The viewer's own SURVEY VOTES, batched the same way.
-				//
-				// A separate query because a survey vote is shaped
-				// differently from a like: `type` is 'survey_vote' and
-				// `object_type` carries the OPTION SLUG rather than the
-				// literal 'feed', so the query above cannot see them.
-				//
-				// This is the whole difference between Noor's designs 8
-				// and 9 (and 11 and 12): both draw a filled bar on the
-				// winning option, and only the viewer's own vote fills
-				// the radio. FluentCommunity's feed payload ships neither
-				// the votes nor a flag, so before this the two states
-				// were indistinguishable and every voted poll rendered as
-				// design 9.
+				// Survey votes have type 'survey_vote' and the option slug in object_type, so the query above misses them.
 				$sql = "SELECT object_id, object_type FROM {$wpdb->prefix}fcom_post_reactions WHERE type = 'survey_vote' AND user_id = %d AND object_id IN ($placeholders)";
 				$rows = $wpdb->get_results( $wpdb->prepare( $sql, $params ), ARRAY_A );
 				if ( is_array( $rows ) ) {
@@ -1625,81 +1105,35 @@ class PreviewProxyController {
 				$items[ $i ]['message_rendered'] = $this->sanitize_rich_text( $item['message_rendered'] );
 			}
 			if ( isset( $item['created_at'] ) && is_string( $item['created_at'] ) && '' !== $item['created_at'] ) {
-				// Keep the machine-readable instant alongside the human one.
-				// `created_at` becomes "24m" here, and anything downstream
-				// that needs to ORDER by time — the comment sort sheet, for
-				// one — cannot get it back: strtotime('24m') is false, and
-				// "1mo" sorts before "5m" alphabetically. Stamped before the
-				// rewrite, once, for every row the proxy touches.
+				// Keep the epoch: created_at becomes "24m" below and can no longer be sorted.
 				$items[ $i ]['created_at_ts'] = (int) strtotime( $item['created_at'] );
 				$items[ $i ]['created_at']    = $this->relative_time( $item['created_at'] );
 			}
-			// The author byline as ONE string — "4h · Appza Community".
-			//
-			// The card used to draw this as two children sharing a grid
-			// cell, the space name shoved right with `padding-left: 32px`.
-			// That holds only while the timestamp is narrower than 32px:
-			// "4h" fits, "12mo" overlaps. A grid cell cannot lay two
-			// blockified items out in a row, so the honest place to join
-			// them is here, next to the relative time this already
-			// derives.
-			//
-			// Falls back to the time alone when the post has no space —
-			// a profile post has none, and " · " with nothing after it
-			// reads as a bug.
 			$items[ $i ]['byline'] = $this->build_byline(
 				isset( $items[ $i ]['created_at'] ) ? $items[ $i ]['created_at'] : '',
 				isset( $item['space'] ) ? $item['space'] : null
 			);
-			// Mark the options this viewer voted for, and normalise the
-			// two count fields FluentCommunity leaves OUT when they are
-			// zero — an option nobody picked has no `vote_counts` and no
-			// `percentage` key at all, so the card had nothing to bind
-			// and drew a blank where "0%" belongs.
+			// FC omits vote_counts/percentage on options nobody picked.
 			if ( isset( $item['content_type'] ) && 'survey' === $item['content_type'] ) {
 				$items[ $i ]['meta'] = $this->normalize_survey(
 					isset( $items[ $i ]['meta'] ) && is_array( $items[ $i ]['meta'] ) ? $items[ $i ]['meta'] : array(),
 					isset( $my_votes_by_feed[ (int) $item['id'] ] ) ? $my_votes_by_feed[ (int) $item['id'] ] : array()
 				);
 			}
-			// The flagged banner's sentence (designs 28 and 34), derived
-			// here for the same reason the byline was: it is THREE
-			// sentences, with a noun that is "post" or "comment" and an
-			// English plural, and no clause grammar can pick between
-			// them. Three children with three gates would be three ways
-			// to say one thing.
-			// Only when there IS a meta object. A post with `meta: null`
-			// cannot be flagged — the flag lives in that very object — so
-			// turning null into [] here would change the payload's shape
-			// for every unflagged row to say nothing new.
+			// Null meta cannot be flagged and must stay null.
 			if ( isset( $items[ $i ]['meta'] ) && is_array( $items[ $i ]['meta'] ) ) {
 				$items[ $i ]['meta'] = $this->add_moderation_banner_text( $items[ $i ]['meta'], 'post' );
 			}
-			// The inline comments the card draws under the action strip
-			// (designs 19, 26). Two jobs FluentCommunity does not do for
-			// us: a PINNED comment has to come first, and each row needs
-			// the same relative timestamp the post above it uses.
 			if ( ! empty( $item['comments'] ) && is_array( $item['comments'] ) ) {
 				$items[ $i ]['comments'] = $this->normalize_comments(
 					$items[ $i ]['comments'],
 					isset( $item['permalink'] ) && is_string( $item['permalink'] ) ? $item['permalink'] : ''
 				);
 			}
-			// The stacked reaction avatars beside the counts (design 19).
-			// Derived here rather than bound straight to `reactions[]`
-			// because the card wants FACES, capped, and the raw array is
-			// every reaction row with a whole xprofile hanging off it.
 			if ( ! empty( $item['reactions'] ) && is_array( $item['reactions'] ) ) {
 				$items[ $i ]['reaction_avatars'] = $this->build_reaction_avatars( $item['reactions'] );
 			}
-			// EMPTY, not "0 likes", when nothing has happened yet.
-			//
-			// Noor's designs 1-6 draw the action strip with no counts at
-			// all on a post with none, and only design 18 onward shows
-			// them. An empty string is what makes that expressible in the
-			// catalog: `visible_when exists` treats '' as absent, so the
-			// child disappears without needing a numeric comparison the
-			// clause grammar does not have.
+			// Empty rather than "0 likes", so `visible_when exists` hides it.
 			if ( isset( $item['reactions_count'] ) && is_numeric( $item['reactions_count'] ) ) {
 				$items[ $i ]['reactions_summary'] = (int) $item['reactions_count'] > 0
 					? $this->pluralize( (int) $item['reactions_count'], 'like', 'likes' )
@@ -1710,50 +1144,23 @@ class PreviewProxyController {
 					? $this->pluralize( (int) $item['comments_count'], 'comment', 'comments' )
 					: '';
 			}
-			// Multi-image posts arrive on `meta.media_items` (array).
-			// Single-image posts arrive on `meta.media_preview` with
-			// type=meta_data. Video/poll variants have neither and skip.
-			// The wp_fcom_media_archive DB table is intentionally NOT queried
-			// here — it holds abandoned uploads too, and would over-count.
+			// fcom_media_archive is not queried: it also holds abandoned uploads.
 			$images = $this->build_images_from_meta( isset( $item['meta'] ) ? $item['meta'] : array() );
 			if ( ! empty( $images ) ) {
 				$items[ $i ]['images'] = $images;
 			}
-			// Document posts ("Publish as a post" on) reach the feed with
-			// their files only in `meta.document_lists` — a creation-time
-			// snapshot whose `url` is FC's portal download route, which
-			// needs a browser session and returns HTML, not a file. So the
-			// feed card had nothing renderable to show.
-			//
-			// Re-derive from the live Media rows, exactly as the DOCUMENTS
-			// tab does, and hand the card the same `files[]` shape it
-			// already knows: {id, media_key, title, type, kind, url}.
+			// meta.document_lists URLs need a portal session and return HTML; derive files from live Media rows.
 			if ( isset( $item['content_type'] ) && 'document' === $item['content_type'] ) {
 				$files = $this->documents_controller()->files_for_feed( (int) $item['id'] );
 				if ( ! empty( $files ) ) {
 					$items[ $i ]['files'] = $files;
 				}
 			}
-			// Banner CTA buttons: derive Ionic fill/color from the API's
-			// `type` string so the renderer can bind them directly without
-			// hardcoding per-slot styling. FluentCommunity offers exactly
-			// four types — primary → filled primary; secondary → outlined
-			// primary; text → filled light (the soft grey one); link →
-			// clear. `allowClose` is NOT touched here: it rides through
-			// untransformed, so a course banner could gate its close × on
-			// it later. The feed banner's own customizer never sets it.
 			if ( isset( $item['ctaButtons'] ) && is_array( $item['ctaButtons'] ) ) {
 				$items[ $i ]['ctaButtons'] = $this->normalize_cta_buttons( $item['ctaButtons'] );
 			}
-			// Space cover fallback. `/spaces/all-spaces` returns
-			// cover_photo=null when the space wasn't given a header image;
-			// `/spaces/discover` fills with FC's placeholder. Detect space
-			// items by the shape (privacy + slug present) and substitute the
-			// FC placeholder so fc-space-card renders a visual cover instead
-			// of the "Image" empty-state block.
-			// `id` joins the test because a FEED LINK also carries privacy
-			// and slug, and was being handed a space's cover placeholder it
-			// has no use for. A space always has an id; a link never does.
+			// /spaces/all-spaces leaves cover_photo null; use FC's placeholder. `id` excludes feed links,
+			// which also carry privacy and slug.
 			$has_space_shape = isset( $item['privacy'] ) && isset( $item['slug'] ) && isset( $item['id'] );
 			$cover_missing = ! isset( $item['cover_photo'] ) || null === $item['cover_photo'] || '' === $item['cover_photo'];
 			if ( $has_space_shape && $cover_missing ) {
@@ -1771,9 +1178,7 @@ class PreviewProxyController {
 		if ( '' === $stored ) {
 			return $data;
 		}
-		// Also strip a common http/https prefix pair so a stored siteurl of
-		// http://foo works for an incoming https://foo request (WP HTTPS
-		// admin behind a tunnel is common) and vice versa.
+		// Match both schemes (e.g. HTTPS behind a tunnel).
 		$stored_host = preg_replace( '#^https?://#i', '', $stored );
 
 		$scheme = ! empty( $_SERVER['HTTP_X_FORWARDED_PROTO'] )
@@ -1791,7 +1196,6 @@ class PreviewProxyController {
 		}
 		$target = $scheme . '://' . $host;
 
-		// Nothing to do if incoming request already came in on the stored URL.
 		if ( $target === $stored ) {
 			return $data;
 		}
@@ -1883,16 +1287,7 @@ class PreviewProxyController {
 					$btn['color'] = 'primary';
 					break;
 				case 'text':
-					// The soft grey button — design 15's DOWNLOAD FREE. This is
-					// the fourth type FluentCommunity actually offers (admin_app.js
-					// Button Type dropdown: Primary / Secondary / Text / Link);
-					// `muted` and `ghost` used to sit here and are written by
-					// nothing, so a real `text` button was falling through to the
-					// primary default and drawing filled blue.
-					//
-					// Ionic's `light` is a pale ground with a DARK contrast text
-					// colour, which is the pair FC's `el-button is-text` draws.
-					// `medium` would give white-on-grey.
+					// Ionic `light` is the pale ground + dark text pair FC's `is-text` button draws.
 					$btn['fill']  = 'solid';
 					$btn['color'] = 'light';
 					break;
@@ -1912,42 +1307,8 @@ class PreviewProxyController {
 	}
 
 	/**
-	 * The sentence the flagged banner draws (designs 28 and 34).
-	 *
-	 * FluentCommunity's own `ReportReview` component picks between three,
-	 * and this reproduces its branches exactly rather than approximating
-	 * them, so the app and the portal accuse a post of the same thing:
-	 *
-	 *   auto_flagged == 'yes'   "This <noun> has been flagged
-	 *                            automatically by the site rule."
-	 *   reports_count > 1       "This <noun> has been flagged with N reports"
-	 *   otherwise               "…with N report"
-	 *
-	 * Returns the meta unchanged when the content is not flagged at all —
-	 * an absent key is what the banner's `exists` gate reads, so writing
-	 * an empty string here would draw an empty cream box on every card.
-	 *
-	 * @param array  $meta
-	 * @param string $noun 'post' | 'comment'
-	 * @return array
-	 */
-	/**
-	 * One image source for a feed link's chip.
-	 *
-	 * FluentCommunity's link shape (CustomSanitizer::santizeLinkItem)
-	 * offers `emoji`, `icon_image` and `shape_svg`, and a chip can bind
-	 * one image. `icon_image` wins when both are set — it is the more
-	 * deliberate choice, since an admin who uploads a file has replaced
-	 * the shape rather than added to it. Raw SVG becomes a data URI so
-	 * the same <img> draws it without the renderer learning to inject
-	 * markup, which is also the safer half: an <img> cannot execute
-	 * script the way an inlined <svg> can.
-	 *
-	 * The emoji is deliberately NOT folded in here. It is text, it
-	 * inherits the chip's font, and rasterising it would make it worse.
-	 *
-	 * @param array $link
-	 * @return string '' when the link has no image icon at all.
+	 * Chip image for a feed link: icon_image, else shape_svg as a data URI (an <img> cannot run script
+	 * the way inlined SVG can). The emoji stays separate because it is text.
 	 */
 	protected function resolve_link_icon( array $link ) {
 		$image = isset( $link['icon_image'] ) ? trim( (string) $link['icon_image'] ) : '';
@@ -1963,6 +1324,7 @@ class PreviewProxyController {
 		return 'data:image/svg+xml;utf8,' . rawurlencode( $svg );
 	}
 
+	/** Mirrors FC's ReportReview wording; unflagged meta is returned untouched so the `exists` gate stays false. */
 	protected function add_moderation_banner_text( array $meta, $noun ) {
 		$auto  = isset( $meta['auto_flagged'] ) ? (string) $meta['auto_flagged'] : '';
 		$count = isset( $meta['reports_count'] ) ? (int) $meta['reports_count'] : 0;
@@ -1999,15 +1361,12 @@ class PreviewProxyController {
 		if ( ! is_array( $meta ) ) {
 			return array();
 		}
-		// Preferred: `media_items` array (fcom multi-image posts).
 		if ( isset( $meta['media_items'] ) && is_array( $meta['media_items'] ) ) {
 			$out = array();
 			foreach ( $meta['media_items'] as $item ) {
 				if ( ! is_array( $item ) ) {
 					continue;
 				}
-				// media_items includes only images per fcom's contract; guard
-				// anyway in case future kinds land on the same field.
 				$type = isset( $item['type'] ) ? (string) $item['type'] : '';
 				if ( '' !== $type && 'image' !== $type ) {
 					continue;
@@ -2023,8 +1382,7 @@ class PreviewProxyController {
 			}
 			return $out;
 		}
-		// Fallback: single-image via media_preview (only for uploaded images,
-		// not oembed video thumbs).
+		// Single uploaded image; oembed thumbnails are excluded.
 		if ( isset( $meta['media_preview'] ) && is_array( $meta['media_preview'] ) ) {
 			$mp = $meta['media_preview'];
 			if ( ( isset( $mp['type'] ) && 'meta_data' === $mp['type'] )
@@ -2044,26 +1402,10 @@ class PreviewProxyController {
 	}
 
 	/**
-	 * A survey post's options, ready for the card.
+	 * Survey options with `voted`, zero-filled counts and recomputed percentages (FC's stored share goes
+	 * stale when options are added later). total_votes counts votes, not voters.
 	 *
-	 * Three jobs, all of them things FluentCommunity leaves to whoever
-	 * draws the poll:
-	 *
-	 *   voted        whether THIS viewer picked the option. The votes are
-	 *                Reaction rows and never reach the feed payload;
-	 *                without this, designs 8 and 9 are the same picture.
-	 *   vote_counts  absent, not 0, on an option nobody picked.
-	 *   percentage   likewise. Recomputed here rather than trusted,
-	 *                because FC writes it at vote time and an option
-	 *                added later carries a stale share.
-	 *
-	 * `total_votes` is the "N Vote" line under the options. It counts
-	 * VOTES, not voters — a multi-choice poll lets one person cast
-	 * several, and design 11 shows 3 for two voters' picks.
-	 *
-	 * @param array $meta
 	 * @param array<int, string> $myVotes Option slugs this viewer picked.
-	 * @return array
 	 */
 	protected function normalize_survey( array $meta, array $myVotes ) {
 		if ( empty( $meta['survey_config']['options'] ) || ! is_array( $meta['survey_config']['options'] ) ) {
@@ -2092,40 +1434,19 @@ class PreviewProxyController {
 
 		$meta['survey_config']['options']     = $options;
 		$meta['survey_config']['total_votes'] = $total;
-		// Whether the viewer has voted AT ALL. The row control is filled
-		// only for the options they picked, but the poll as a whole
-		// changes state on the first vote — which is what tells design 7
-		// (nobody has voted) from design 9 (someone has, not me).
 		$meta['survey_config']['has_voted'] = ! empty( $myVotes );
 
 		return $meta;
 	}
 
-	/**
-	 * Inline comments, ready for the card: pinned first, relative times.
-	 *
-	 * FluentCommunity returns them in creation order with a raw
-	 * `created_at` and an `is_sticky` flag nobody has acted on. Design 26
-	 * puts the pinned one at the top of the strip, and its own controller
-	 * un-sticks every other comment on the post when one is pinned — so
-	 * "pinned first" can only ever move ONE row, and a stable sort keeps
-	 * the rest in the order FC chose.
-	 *
-	 * @param array  $comments
-	 * @param string $postPermalink The parent post's URL, for comment links.
-	 * @return array
-	 */
+	/** Pinned first (FC allows one sticky per post), relative times, sanitized bodies, comment permalinks. */
 	protected function normalize_comments( array $comments, $postPermalink = '' ) {
 		foreach ( $comments as $i => $comment ) {
 			if ( ! is_array( $comment ) ) {
 				continue;
 			}
 			if ( isset( $comment['created_at'] ) && is_string( $comment['created_at'] ) && '' !== $comment['created_at'] ) {
-				// Same reason as normalize_items(): stamp the epoch before
-				// the string stops being one. Guarded so a second pass over
-				// an already-relative value cannot overwrite a good stamp
-				// with 0 — thread_comments runs this over the parents after
-				// the generic pass has already run over them once.
+				// Don't overwrite a good stamp on thread_comments()' second pass.
 				if ( empty( $comments[ $i ]['created_at_ts'] ) ) {
 					$comments[ $i ]['created_at_ts'] = (int) strtotime( $comment['created_at'] );
 				}
@@ -2134,24 +1455,16 @@ class PreviewProxyController {
 			if ( isset( $comment['message_rendered'] ) && is_string( $comment['message_rendered'] ) ) {
 				$comments[ $i ]['message_rendered'] = $this->sanitize_rich_text( $comment['message_rendered'] );
 			}
-			// Design 34's banner, with "comment" as the noun. Same guard as
-			// the post's above: an unflagged comment's `meta` is null and
-			// stays null.
 			if ( isset( $comment['meta'] ) && is_array( $comment['meta'] ) ) {
 				$comments[ $i ]['meta'] = $this->add_moderation_banner_text( $comment['meta'], 'comment' );
 			}
-			// "Copy link" on a comment (design 24). FluentCommunity gives
-			// a comment no permalink of its own — the portal links to the
-			// post and anchors to the comment, so we build the same thing
-			// rather than inventing a route that would 404.
+			// FC comments have no permalink of their own; the portal anchors to the post.
 			if ( '' !== $postPermalink && isset( $comment['id'] ) ) {
 				$comments[ $i ]['permalink'] = $postPermalink . '#comment-' . (int) $comment['id'];
 			}
 		}
 
-		// usort is NOT stable before PHP 8.0; this box runs 8+, where it
-		// is. Comparing only the sticky flag therefore leaves equal rows
-		// in FluentCommunity's own order rather than reversing them.
+		// usort is stable on PHP 8+, so non-sticky rows keep FC's order.
 		usort(
 			$comments,
 			static function ( $a, $b ) {
@@ -2164,12 +1477,7 @@ class PreviewProxyController {
 		return $comments;
 	}
 
-	/**
-	 * The standalone comment thread: flat rows in, two-level tree out.
-	 *
-	 * @param array $rows
-	 * @return array
-	 */
+	/** Flat rows in, two-level tree out. */
 	protected function thread_comments( array $rows, $plural = false ) {
 		$byId    = array();
 		$permalink = '';
@@ -2180,9 +1488,6 @@ class PreviewProxyController {
 			}
 		}
 
-		// One permalink for the whole thread — every row belongs to the
-		// same post, so resolving it per comment would be the same lookup
-		// repeated for an answer that cannot differ.
 		$firstPostId = 0;
 		foreach ( $rows as $row ) {
 			if ( is_array( $row ) && ! empty( $row['post_id'] ) ) {
@@ -2197,10 +1502,7 @@ class PreviewProxyController {
 			}
 		}
 
-		// Resolve each row's TOP-LEVEL ancestor, and the display name of
-		// its immediate parent. The walk is bounded by the row count so a
-		// cyclic parent_id — which no writer should produce and a restored
-		// dump might — cannot spin here.
+		// The seen-set guards against a cyclic parent_id (e.g. a restored dump).
 		$rootOf   = array();
 		$resolve  = function ( $id ) use ( &$byId, &$rootOf ) {
 			$seen = array();
@@ -2224,10 +1526,7 @@ class PreviewProxyController {
 			}
 			$id = (int) $row['id'];
 
-			// The epoch normalize_items() stamped before it rewrote
-			// created_at into "24m". Falling back to strtotime covers the
-			// row that never went through that pass; it cannot be the only
-			// source, because by the time this runs created_at is a phrase.
+			// created_at is already relative here, so prefer the stamped epoch.
 			$row['sort_time'] = isset( $row['created_at_ts'] )
 				? (int) $row['created_at_ts']
 				: ( is_string( $row['created_at'] ?? null ) ? (int) strtotime( $row['created_at'] ) : 0 );
@@ -2247,9 +1546,7 @@ class PreviewProxyController {
 			$replies[ $rootId ][] = $row;
 		}
 
-		// A reply whose ancestor is not in this response (a moderated-away
-		// parent, say) would otherwise vanish with it. Promote it to the
-		// top rather than dropping a comment somebody wrote.
+		// Promote replies whose ancestor is missing (e.g. moderated away) rather than drop them.
 		foreach ( $replies as $rootId => $kids ) {
 			if ( isset( $parents[ $rootId ] ) ) {
 				continue;
@@ -2279,28 +1576,17 @@ class PreviewProxyController {
 					? sprintf( _n( '%d Reply', '%d Replies', (int) $parent['reply_count'], 'appza-core' ), $parent['reply_count'] )
 					: sprintf( __( '%d Reply', 'appza-core' ), $parent['reply_count'] );
 			}
-			// The order the sheet's "Most replied" row sorts on. Present on
-			// every parent, including the ones with none, so the comparison
-			// never has to treat a missing key as a number.
 			$parent['sort_replies'] = $parent['reply_count'];
 			$out[] = $parent;
 		}
 
-		// Pinned first + relative times + sanitized bodies + comment
-		// permalinks, for the top level. The replies went through the same
-		// pass above; running it once over a nested array would have
-		// re-sorted the children into the parents.
+		// Top level only: one pass over the nested array would re-sort children into the parents.
 		return $this->normalize_comments( $out, $permalink );
 	}
 
 	/**
-	 * The stacked faces beside "2 likes · 3 comments" (design 19).
+	 * Up to four distinct liker faces.
 	 *
-	 * Capped at four: the design draws two and the stack stops reading as
-	 * a stack much beyond that. De-duplicated by user, because one person
-	 * who both liked and bookmarked a post is one face, not two.
-	 *
-	 * @param array $reactions
 	 * @return array<int, array{user_id:int, avatar:string, display_name:string}>
 	 */
 	protected function build_reaction_avatars( array $reactions ) {
@@ -2309,8 +1595,7 @@ class PreviewProxyController {
 			if ( ! is_array( $reaction ) ) {
 				continue;
 			}
-			// Bookmarks live in the same table as likes. A private
-			// bookmark must not put someone's face on a public post.
+			// Bookmarks share the table; a private bookmark must not show a face.
 			if ( isset( $reaction['type'] ) && 'like' !== $reaction['type'] ) {
 				continue;
 			}
@@ -2335,16 +1620,6 @@ class PreviewProxyController {
 		return array_values( $out );
 	}
 
-	/**
-	 * "4h · Appza Community", or "4h" on a post with no space.
-	 *
-	 * The separator is U+00B7 MIDDLE DOT with hair spaces either side —
-	 * the same glyph FluentCommunity's own portal byline uses, so the app
-	 * and the portal read identically.
-	 *
-	 * @param string $when  Already-relative time ("4h", "1d").
-	 * @param mixed  $space The row's `space` object, or null.
-	 */
 	protected function build_byline( $when, $space ) {
 		$when = is_string( $when ) ? trim( $when ) : '';
 
@@ -2363,14 +1638,7 @@ class PreviewProxyController {
 		return $when . ' · ' . $title;
 	}
 
-	/**
-	 * Sanitize inline-formatted body text via wp_kses with a small explicit
-	 * safelist. Preserves author formatting (bold / italic / links / paragraph
-	 * breaks) while blocking scripts, iframes, and all attribute-based XSS
-	 * vectors. Consumed by the `appza-rich-text` primitive on the renderer
-	 * side via dangerouslySetInnerHTML — because we sanitize here, the
-	 * innerHTML sink is safe.
-	 */
+	/** The renderer injects this via dangerouslySetInnerHTML, so keep the safelist tight. */
 	protected function sanitize_rich_text( $html ) {
 		$allowed = array(
 			'strong'     => array(),
@@ -2393,19 +1661,7 @@ class PreviewProxyController {
 		return trim( wp_kses( $html, $allowed ) );
 	}
 
-	/**
-	 * What the CURRENT user is to this community — moderator, admin, or
-	 * neither.
-	 *
-	 * Two flags rather than one because FluentCommunity draws the line in
-	 * two different places: blocking is refused to a MODERATOR
-	 * specifically, while managing members is open to either.
-	 *
-	 * FluentCommunity's own check, called defensively: this proxy runs
-	 * inside a site where the class may be absent (FC deactivated) or may
-	 * move, and a fatal here would take out every profile read rather than
-	 * one menu row.
-	 */
+	/** FC's moderator/admin verdicts for the current user; defensive because FC may be absent. */
 	protected function viewer_roles( $viewer_id = 0 ) {
 		$none = array( 'is_moderator' => false, 'is_admin' => false );
 		if ( ! class_exists( '\\FluentCommunity\\App\\Services\\Helper' ) ) {
@@ -2422,12 +1678,7 @@ class PreviewProxyController {
 
 		$roles = array( 'is_moderator' => false, 'is_admin' => false );
 
-		// isModerator() alone is NOT enough, and the portal proves it: raju
-		// is a WordPress admin who sees "Add To Space/Course" there, and
-		// Helper::isModerator() answers false for him — a community
-		// MODERATOR is a narrower thing than a site admin. Either may manage
-		// members, so the flag is the union; the endpoint remains the real
-		// authority and refuses anyone this lets through by mistake.
+		// A site admin is not necessarily Helper::isModerator(); callers choose which flag they need.
 		if ( method_exists( '\\FluentCommunity\\App\\Services\\Helper', 'isSiteAdmin' ) ) {
 			$roles['is_admin'] = (bool) \FluentCommunity\App\Services\Helper::isSiteAdmin( $viewer_id ?: null );
 		}
@@ -2436,7 +1687,6 @@ class PreviewProxyController {
 		return $roles;
 	}
 
-	/** Two-letter initials, for an avatar with no photo. */
 	protected function initials_for( $name ) {
 		$parts = preg_split( '/\s+/', trim( (string) $name ) );
 		if ( ! $parts || '' === $parts[0] ) {
@@ -2494,20 +1744,6 @@ class PreviewProxyController {
 		}
 	}
 
-	/**
-	 * Demo saved posts, so the Saved Posts screen is reviewable in the
-	 * simulator's demo mode instead of showing its empty state.
-	 *
-	 * The feed fixture, marked bookmarked — the rows are shape-identical
-	 * (the real route is FluentCommunity's own feed query filtered to the
-	 * viewer's bookmarks) and inventing a second body of demo content
-	 * would only give the two screens different-looking cards for no
-	 * reason.
-	 *
-	 * `bookmarked` is what the card's glyph binds to, and on this screen
-	 * every row is bookmarked by definition — a hollow glyph here would
-	 * be demo data contradicting the page it is demoing.
-	 */
 	protected function fixture_fc_bookmarks() {
 		$rows = $this->fixture_fc_feed();
 		foreach ( $rows as $i => $row ) {
@@ -2519,12 +1755,6 @@ class PreviewProxyController {
 		return $rows;
 	}
 
-	/**
-	 * Demo current-user profile for the composer teaser avatar. Real
-	 * endpoint (/wp-json/fcom-mobile/api/v1/user/profile-avatar) needs
-	 * an auth session — this fixture lets the plug-in-admin simulator
-	 * still render an avatar without login.
-	 */
 	protected function fixture_fc_current_user() {
 		return array(
 			array(
@@ -2535,27 +1765,16 @@ class PreviewProxyController {
 		);
 	}
 
-	/**
-	 * Demo banner content matching the image-1 design: hero image + title +
-	 * short description + 4 CTAs in the 2-per-row layout. Used when the real
-	 * fcom-mobile welcome-banner endpoint is unavailable OR the caller
-	 * explicitly requests mode=demo.
-	 */
 	protected function fixture_fc_welcome_banner() {
 		return array(
 			array(
 				'enabled'              => 'yes',
 				'title'                => 'Build Mobile Apps With Zero Coding',
-				// Long enough to overflow the collapsed clamp, so the demo
-				// exercises View More / View Less rather than only the
-				// >2-buttons half of the verdict.
 				'description_rendered' => '<p>Bring your website to the mobile world without a single line of code, be it blog, e-commerce, LMS or anything else! It uses custom components to make your app and also provides access to component properties to have better control, allowing you to make the app exactly how you want it to be.</p>',
 				'mediaType'            => 'image',
 				'bannerImage'          => 'https://picsum.photos/seed/appza-banner/800/450',
 				'bannerVideo'          => null,
 				'allowClose'           => 'yes',
-				// One of each type, in the order FluentCommunity's Button
-				// Type dropdown lists them — design 15 draws all four.
 				'ctaButtons'           => array(
 					array( 'label' => 'Try Demo',      'link' => 'https://appza.io/demo',     'type' => 'primary',   'newTab' => 'yes' ),
 					array( 'label' => 'Buy Now',       'link' => 'https://appza.io/buy',      'type' => 'secondary', 'newTab' => 'yes' ),
@@ -2702,13 +1921,6 @@ class PreviewProxyController {
 		);
 	}
 
-	/**
-	 * Demo "all spaces" list mirroring the fcom-mobile /spaces/discover
-	 * shape — cover_photo + title + description + members_count +
-	 * privacy + optional space_pivot (present = viewer is a member; the
-	 * renderer switches the CTA + member badge on this). Two entries so
-	 * one card shows the joined state and the other the Join state.
-	 */
 	protected function fixture_fc_spaces_all() {
 		return array(
 			array(
@@ -2756,12 +1968,6 @@ class PreviewProxyController {
 		);
 	}
 
-	/**
-	 * Demo Space Details header + settings for the "Appza Community" space
-	 * (id=2, slug=appza). Includes topics so the "Choose topic" strip has
-	 * content, permissions so composer + Members visibility gate correctly,
-	 * and membership pivot so the joined-state UI paints.
-	 */
 	protected function fixture_fc_space_detail() {
 		return array(
 			array(
@@ -2838,12 +2044,6 @@ class PreviewProxyController {
 		);
 	}
 
-	/**
-	 * Demo feed for the Space Details FEEDS tab. First post carries a
-	 * Development topic term + featured image + one comment so the design
-	 * mock (topic pill + hero + inline first-comment preview) has real
-	 * data. Later posts are minimal.
-	 */
 	protected function fixture_fc_space_feeds() {
 		$now = time();
 		return array(
@@ -2876,10 +2076,6 @@ class PreviewProxyController {
 				'comments'         => array(
 					array(
 						'id'                => 5001,
-						// Skeleton renders this as text (not HTML), so ship the stripped
-							// plain form. Real FC returns both `content` (plain) and
-							// `content_rendered` (HTML); when the SS binding retargets
-							// to `content` this can carry the HTML again.
 							'content'           => 'Love the new topics strip — makes it way easier to jump around.',
 							'content_rendered'  => 'Love the new topics strip — makes it way easier to jump around.',
 						'xprofile'          => array(
@@ -3004,10 +2200,6 @@ class PreviewProxyController {
 		);
 	}
 
-	/**
-	 * Placeholder MEMBERS-tab data. This arc renders a placeholder screen
-	 * for the tab; a minimal fixture is enough to prove the DS wiring.
-	 */
 	protected function fixture_fc_space_members() {
 		return array(
 			array(
@@ -3055,13 +2247,6 @@ class PreviewProxyController {
 		);
 	}
 
-	/**
-	 * Demo DOCUMENTS-tab data. Mirrors the live wrapper's shape exactly —
-	 * one entry per document POST (not per file), display strings already
-	 * composed, and a `files[]` array that fc-document-card expands via
-	 * children_from_prop. Demo mode is what the builder sees before a site
-	 * has real documents, so it has to render the same card as Real.
-	 */
 	protected function fixture_fc_space_documents() {
 		$now = time();
 		return array(
@@ -3112,12 +2297,6 @@ class PreviewProxyController {
 		);
 	}
 
-	/**
-	 * Demo "my spaces" list — subset of the discover list where the
-	 * viewer is a member. Handle() stamps space_pivot on this ds_slug
-	 * so all cards render the View Space CTA (children[10] visible_when
-	 * depends on space_pivot exists).
-	 */
 	protected function fixture_fc_spaces_my() {
 		return array(
 			array(

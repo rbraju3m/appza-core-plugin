@@ -1,10 +1,4 @@
 <?php
-/**
- * Schema coordinator. Runs every schema's install() in deterministic order and
- * bumps the appza_core_db_version option so future activations can short-circuit
- * once migrations are introduced.
- */
-
 namespace AppzaCore\Plugin\Schema;
 
 if ( ! defined( 'WPINC' ) ) {
@@ -13,10 +7,7 @@ if ( ! defined( 'WPINC' ) ) {
 
 class SchemaManager {
 
-	// Bumped to 2 with the wp_appza_customizations addition (Phase 1B.5a).
-	// Bumped to 3 with the wp_appza_refresh_tokens addition (Phase 1B.6 chunk 2).
-	// Bumped to 4: appzet_primitive scope added to customizations ENUM (DC#20).
-	// Bumped to 5: wp_appza_space_config added for per-space runtime overrides.
+	// Bump when any schema changes; maybe_upgrade_schema() re-runs install() on mismatch.
 	const DB_VERSION = '5';
 
 	public static function install() {

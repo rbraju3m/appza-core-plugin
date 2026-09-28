@@ -1,19 +1,4 @@
 <?php
-/**
- * REST handlers under appza/auth/v1 (DC#13 Q4).
- *
- *   POST /login    — username + password → access + refresh
- *   POST /refresh  — refresh_token       → rotated access + refresh
- *   POST /logout   — refresh_token       → 204 (best-effort revoke)
- *   POST /guest    — (no body)           → guest access token (no refresh)
- *   GET  /me       — Bearer required     → current user info
- *
- * /me reads the Authorization header directly via WP_REST_Request rather
- * than relying on the Bearer middleware (chunk 4). The two approaches
- * coexist — middleware additionally calls wp_set_current_user(sub) so
- * add-on plug-ins see a logged-in user on routes outside our namespace.
- */
-
 namespace AppzaCore\Plugin\Rest;
 
 use AppzaCore\Plugin\Repository\RefreshTokenRepository;
@@ -63,7 +48,6 @@ class AuthController {
 
 		$user_id = $this->refresh_tokens->find_user_id( $rotated['token'] );
 		if ( null === $user_id ) {
-			// Should be impossible since we just issued, but defense in depth.
 			return new \WP_Error( 'appza_auth_refresh_lookup_failed', 'Newly issued refresh token did not resolve.', array( 'status' => 500 ) );
 		}
 
@@ -84,7 +68,7 @@ class AuthController {
 		if ( '' !== $refresh_token ) {
 			$this->refresh_tokens->revoke( $refresh_token );
 		}
-		// Always 204 — don't leak whether the token existed.
+		// Always 204: don't leak whether the token existed.
 		return new \WP_REST_Response( null, 204 );
 	}
 
@@ -135,7 +119,6 @@ class AuthController {
 		);
 	}
 
-	/** Issues an access + refresh pair and shapes the response body. */
 	private function token_pair_response( int $user_id, \WP_User $user ): \WP_REST_Response {
 		$access  = $this->jwt->issue_access_token( $user_id );
 		$refresh = $this->refresh_tokens->issue( $user_id );
@@ -161,13 +144,7 @@ class AuthController {
 		);
 	}
 
-	/**
-	 * Pulls the JWT out of `Authorization: Bearer <jwt>`, looking in every
-	 * reasonable place the value might land. Apache + PHP-FPM strips the
-	 * Authorization header by default in some configs; this fallback chain
-	 * keeps the plug-in working without forcing customers to edit their
-	 * .htaccess.
-	 */
+	/** Some Apache/PHP-FPM setups strip Authorization; fall back so customers needn't edit .htaccess. */
 	public static function extract_bearer_from_request( \WP_REST_Request $request ): string {
 		$candidates = array( (string) $request->get_header( 'authorization' ) );
 		if ( isset( $_SERVER['HTTP_AUTHORIZATION'] ) ) {

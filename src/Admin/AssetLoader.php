@@ -1,23 +1,4 @@
 <?php
-/**
- * Loads the built @appza/plugin-admin React bundle into the WP admin.
- *
- * Vite emits `assets/admin/manifest.json` next to the hashed bundle
- * files. We read it to discover the entry JS + CSS filenames; their
- * hashes change every build and we don't want to grep the directory.
- *
- * The bundle is only enqueued on the APPZA Core "App" page — every
- * other admin screen stays untouched.
- *
- * Cross-cuts WP REST + JS:
- *   - `apiUrl` is `rest_url()` so the React app uses whatever URL form
- *     this install's permalinks produce (pretty `/wp-json/...` or the
- *     query-form `?rest_route=/...`). Same code works on every install.
- *   - The entry script needs type="module" because Vite emits ES
- *     modules; WP's wp_enqueue_script doesn't add that attribute by
- *     default, so we hook script_loader_tag.
- */
-
 namespace AppzaCore\Plugin\Admin;
 
 if ( ! defined( 'WPINC' ) ) {
@@ -29,7 +10,6 @@ class AssetLoader {
 	const HANDLE = 'appza-core-admin-app';
 
 	public function enqueue( $hook_suffix ) {
-		// Only on the APPZA Core "App" page.
 		if ( 'toplevel_page_' . AdminMenu::SLUG !== $hook_suffix ) {
 			return;
 		}
@@ -46,8 +26,6 @@ class AssetLoader {
 			return;
 		}
 
-		// Vite manifests key by source-relative input path. plugin-admin's
-		// entry is `index.html`.
 		$entry = $manifest['index.html'] ?? null;
 		if ( ! is_array( $entry ) ) {
 			return;
@@ -55,7 +33,6 @@ class AssetLoader {
 
 		$base_url = APPZA_CORE_PLUGIN_URL . 'assets/admin/';
 
-		// Entry JS.
 		if ( ! empty( $entry['file'] ) ) {
 			wp_enqueue_script(
 				self::HANDLE,
@@ -69,13 +46,7 @@ class AssetLoader {
 				'appzaCoreConfig',
 				array(
 					'endpoints'       => array(
-						// Full URL per endpoint. The React app appends query
-						// params via the URL API — that works whether the
-						// host returns pretty `/wp-json/...` or query-form
-						// `/?rest_route=/...` URLs. Sidestep: hosts where
-						// Apache rewrites are broken can define
-						// APPZA_CORE_FORCE_QUERY_REST so we hand the query
-						// form regardless of permalink settings.
+						// Full URLs: the app appends params via the URL API, so pretty and ?rest_route= forms both work.
 						'bootstrap'                => esc_url_raw( $this->endpoint_url( 'bootstrap' ) ),
 						'customizations'           => esc_url_raw( $this->endpoint_url( 'customizations' ) ),
 						'syncFromCore'             => esc_url_raw( $this->endpoint_url( 'sync-from-core' ) ),
@@ -84,20 +55,14 @@ class AssetLoader {
 						'templates'                => esc_url_raw( $this->endpoint_url( 'templates' ) ),
 							'buildRequests'            => esc_url_raw( $this->endpoint_url( 'build-requests' ) ),
 					),
-					// Cookie-auth'd REST calls need this header (X-WP-Nonce).
-					// The mutating customizations endpoints check it via WP's
-					// rest_cookie_check_errors filter.
 					'restNonce'       => wp_create_nonce( 'wp_rest' ),
 					'defaultTemplate' => 'fluent-community-default',
 					'assetsBase'      => esc_url_raw( $base_url ),
-					// Auto-fill target for the Build App modal's "Current site URL" option.
 					'siteUrl'         => esc_url_raw( get_site_url() ),
 				)
 			);
 		}
 
-		// Entry CSS (Vite emits CSS as a sibling asset; index.html's
-		// "css" key lists every CSS file the entry chunk imports).
 		if ( ! empty( $entry['css'] ) && is_array( $entry['css'] ) ) {
 			foreach ( $entry['css'] as $i => $css_file ) {
 				wp_enqueue_style(
@@ -110,11 +75,7 @@ class AssetLoader {
 		}
 	}
 
-	/**
-	 * WordPress's wp_enqueue_script emits classic <script src> by default.
-	 * Vite output is ESM, so we have to flip the entry handle's tag to
-	 * <script type="module" src>.
-	 */
+	/** Vite emits ES modules; WP doesn't add type="module" itself. */
 	public function add_module_type( $tag, $handle ) {
 		if ( self::HANDLE !== $handle ) {
 			return $tag;

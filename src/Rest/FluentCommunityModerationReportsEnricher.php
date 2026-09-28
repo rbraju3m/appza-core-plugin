@@ -1,29 +1,8 @@
 <?php
 /**
- * Hooks `rest_request_after_callbacks` to give each moderation report row
- * the three strings the review modal draws (Noor's design 30), and the
- * card and menu fields of the Moderation screen (doc states 7–32), so the
- * shells bind values instead of branching.
- *
- * Same hook and the same reason as FluentCommunityFeedPermissionsFilter:
- * `rest_request_after_callbacks` fires inside dispatch(), which catches
- * both the outer serve_request and the rest_do_request sub-calls the
- * preview proxy makes for the WP-admin simulator. And the same policy —
- * fcom-mobile is third-party and stays unmodified (P68); we hook its
- * response rather than editing it.
- *
- * The branch reproduced here is FluentCommunity's own, from the
- * `ReportReviewModal` row template in its portal bundle:
- *
- *   no reporter AND no label for the reason  →  "Flagged automatically
- *                                               by the site rule"
- *   otherwise                                →  "<who> reported for <label>"
- *
- * It reads that way because the AUTO reasons — flag_all_new_posts,
- * user_flagged, profanity, first_post_approval — are deliberately absent
- * from Helper::getReportReasons(), which lists only the six a HUMAN can
- * pick. An unlabelled reason with no reporter is therefore exactly "the
- * site rule did this", and FC uses the absence as the signal.
+ * Adds headline, card and menu fields to moderation report rows so the shells bind values.
+ * FC's own rule: no reporter and an unlabelled reason means an auto-flag, because the auto
+ * reasons are deliberately absent from Helper::getReportReasons().
  */
 
 namespace AppzaCore\Plugin\Rest;
@@ -40,12 +19,6 @@ class FluentCommunityModerationReportsEnricher {
 		add_filter( 'rest_request_after_callbacks', array( $this, 'enrich' ), 10, 3 );
 	}
 
-	/**
-	 * @param \WP_REST_Response|\WP_HTTP_Response|\WP_Error|mixed $response
-	 * @param array                                              $handler
-	 * @param \WP_REST_Request                                   $request
-	 * @return mixed
-	 */
 	public function enrich( $response, $handler, $request ) {
 		if ( ! ( $response instanceof \WP_REST_Response ) ) {
 			return $response;
@@ -90,11 +63,9 @@ class FluentCommunityModerationReportsEnricher {
 		}
 
 		if ( '' === $who && '' === $label ) {
-			// The auto case — design 30's bold line.
 			$row['headline'] = __( 'Flagged automatically by the site rule', 'appza-core' );
 		} else {
-			// A human report, or a system one whose reason IS labelled.
-			// "By System" is FluentCommunity's own wording for the second.
+			// "By System" is FC's wording for a labelled system report.
 			$row['headline'] = '' === $label
 				? ( '' !== $who ? $who : __( 'By System', 'appza-core' ) )
 				: sprintf(
@@ -107,7 +78,6 @@ class FluentCommunityModerationReportsEnricher {
 
 		$row['reason_label'] = $label;
 		$row['reporter_name'] = $who;
-		// Design 12's face beside the reporter's name. An auto-flag has none.
 		$row['reporter_avatar'] = $reporter && isset( $reporter['avatar'] ) && is_string( $reporter['avatar'] ) ? $reporter['avatar'] : '';
 		if ( ! empty( $row['created_at'] ) && is_string( $row['created_at'] ) ) {
 			$row['created_at_relative'] = $this->relative_time( $row['created_at'] );
@@ -117,13 +87,7 @@ class FluentCommunityModerationReportsEnricher {
 	}
 
 	/**
-	 * The Moderation screen's card and menu (doc states 7–32, 2026-09-17).
-	 *
-	 * A report row carries the content it is about twice over — `post`
-	 * always, `comment` too when a comment was reported — and a child binds
-	 * one flat path. So the fields the card draws are lifted from whichever
-	 * of the two the report is about: its author, its words, whether it has
-	 * media, and how many reports it carries.
+	 * Lifts card fields from `comment` or `post`, whichever the report is about.
 	 *
 	 * @param array<string, mixed> $row
 	 * @return array<string, mixed>
@@ -147,26 +111,15 @@ class FluentCommunityModerationReportsEnricher {
 		$space = isset( $post['space'] ) && is_array( $post['space'] ) ? $post['space'] : array();
 		$row['space_title'] = isset( $space['title'] ) ? (string) $space['title'] : '';
 
-		// Plain text from the raw message: the card draws a line of words,
-		// and FluentCommunity's own `title` here is a 160-character human
-		// excerpt that the review modal's Details tab already uses.
 		$plain = isset( $content['message'] ) ? wp_strip_all_tags( (string) $content['message'] ) : '';
 		$plain = trim( (string) preg_replace( '/\s+/u', ' ', $plain ) );
 		$row['excerpt'] = mb_strlen( $plain ) > 140 ? rtrim( mb_substr( $plain, 0, 140 ) ) . '…' : $plain;
 		$row['content_body_html'] = isset( $content['message_rendered'] ) ? (string) $content['message_rendered'] : '';
 
-		// The review modal's Details box (designs 9, 26, 31): a bold title
-		// over the words. Only a post has one — FluentCommunity fills it
-		// with an excerpt when the author wrote none, as its portal shows.
 		$row['content_title'] = ! $is_comment && isset( $post['title'] ) ? (string) $post['title'] : '';
 
-		// Design 7's clapperboard under the words. A post's media is its
-		// oEmbed preview, its featured image or its uploaded media; a comment
-		// carries only the first and the last.
 		$meta = isset( $content['meta'] ) && is_array( $content['meta'] ) ? $content['meta'] : array();
 		$row['has_media'] = ! empty( $meta['media_preview'] ) || ! empty( $meta['media_items'] ) || ! empty( $content['featured_image'] );
-		// Design 9's picture under the words: the oEmbed's thumbnail, the
-		// featured image, or the first uploaded item — whichever exists.
 		$media_url = '';
 		if ( isset( $meta['media_preview']['image'] ) && is_string( $meta['media_preview']['image'] ) ) {
 			$media_url = $meta['media_preview']['image'];
@@ -177,8 +130,6 @@ class FluentCommunityModerationReportsEnricher {
 		}
 		$row['content_media_url'] = $media_url;
 
-		// Design 7's chip. `reports_count` on the row is FluentCommunity's
-		// count for that content at the time this report was filed.
 		$count = isset( $row['reports_count'] ) ? max( 1, (int) $row['reports_count'] ) : 1;
 		/* translators: %d: number of reports on the content */
 		$row['reports_count_label'] = sprintf( _n( '%d report', '%d reports', $count, 'appza-core' ), $count );
@@ -188,20 +139,8 @@ class FluentCommunityModerationReportsEnricher {
 		$row['is_auto_flagged'] = $is_auto
 			|| ( isset( $row['meta']['flagged_by'] ) && 'auto' === $row['meta']['flagged_by'] );
 
-		// Which rows and buttons a report offers, per tab — Noor's designs.
-		// Published as POSITIVE booleans because a menu row's visible_when
-		// is a truthiness test with AND and no OR or negation (P159), and
-		// the modal reads the same fields so the two can never disagree
-		// with the table in .scratch/moderation/plan.md:
-		//
-		//   status        menu (8, 16, 25, 30)            modal (9, 17, 26, 31)
-		//   pending       dismiss, unpublish              dismiss, unpublish
-		//   flagged       approve, publish, delete        dismiss, unpublish
-		//   ignored       unpublish, delete               unpublish, delete
-		//   unpublished   approve, delete                 publish, delete
-		//
-		// Review is on every row, so it has no field. Delete removes the
-		// REPORT and leaves the content (Noor, 2026-09-17).
+		// Positive booleans: visible_when is AND-only truthiness, no OR or negation.
+		// Delete removes the REPORT, not the content.
 		$status = isset( $row['status'] ) ? (string) $row['status'] : '';
 		$row['menu_can_dismiss']     = 'pending' === $status;
 		$row['menu_can_approve']     = in_array( $status, array( 'flagged', 'unpublished' ), true );
@@ -216,9 +155,7 @@ class FluentCommunityModerationReportsEnricher {
 		return $row;
 	}
 
-	/**
-	 * @return array<string, string>
-	 */
+	/** @return array<string, string> */
 	protected function report_reasons() {
 		$helper = '\\FluentCommunity\\App\\Services\\Helper';
 		if ( ! class_exists( $helper ) || ! method_exists( $helper, 'getReportReasons' ) ) {
@@ -228,10 +165,6 @@ class FluentCommunityModerationReportsEnricher {
 		return is_array( $reasons ) ? $reasons : array();
 	}
 
-	/**
-	 * The same short form the post card uses, so "now" beside a report
-	 * reads like "now" beside the post it is about.
-	 */
 	protected function relative_time( $datetime_str ) {
 		try {
 			$then = new \DateTime( $datetime_str, new \DateTimeZone( 'UTC' ) );

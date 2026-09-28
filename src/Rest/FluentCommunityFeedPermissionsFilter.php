@@ -1,19 +1,7 @@
 <?php
 /**
- * Hooks `rest_request_after_callbacks` to attach a `permissions` bag to every
- * FluentCommunity feed row returned by fcom-mobile's REST endpoints.
- *
- * The bag drives the mobile 3-dot menu's per-item visibility (Edit, Delete,
- * Pin, Report, Disable/Enable Comments). Computed server-side using
- * FluentCommunity's own capability helpers so results match what the web
- * portal would show for the same viewer.
- *
- * Runs inside dispatch() (not post_dispatch) so the filter fires for the
- * internal `rest_do_request` calls made by PreviewProxyController for the
- * WP-admin simulator — `rest_post_dispatch` only fires for the outer
- * serve_request and would miss sub-requests entirely. Also covers direct
- * mobile-app calls to `/wp-json/fcom-mobile/*` (dispatch runs the same
- * filter on any route).
+ * Attaches a `permissions` bag (3-dot menu verdicts) to fcom-mobile feed and comment rows,
+ * using FluentCommunity's own capability rules so the app matches the portal.
  */
 
 namespace AppzaCore\Plugin\Rest;
@@ -24,45 +12,20 @@ if ( ! defined( 'WPINC' ) ) {
 
 class FluentCommunityFeedPermissionsFilter {
 
-	/**
-	 * fcom-mobile routes whose response payload contains one or more feed
-	 * rows we should enrich. Read routes return an `items` array or the
-	 * single feed row directly; write routes (create/patch/update) return
-	 * a single row under `items`.
-	 */
 	const ENRICHABLE_ROUTES = [
 		'/fcom-mobile/api/v1/feeds',
 		'/fcom-mobile/api/v1/feeds/create',
 		'/fcom-mobile/api/v1/feeds/patch',
 		'/fcom-mobile/api/v1/feeds/update',
 		'/fcom-mobile/api/v1/feeds/by/slug',
-		// Saved Posts (2026-08-19). The same rows as /feeds, filtered to
-		// the viewer's bookmarks — and the 3-dot sheet on that screen is
-		// gated entirely on the bag computed below. Without this line
-		// every saved post offers every menu item to everybody, which is
-		// exactly the difference Noor's design 4 turns on.
 		'/fcom-mobile/api/v1/feeds/bookmarks',
 	];
 
-	/**
-	 * The standalone comment list under post detail. Handled on its own
-	 * branch below, because these items are COMMENTS, not feeds: they
-	 * carry no space_id of their own (the post's space is what scopes
-	 * every comment capability), and the feed bag's rows — pin to
-	 * sidebar, disable comments, remove preview — mean nothing here.
-	 *
-	 * Without this the whole comment menu was ungated: designs 22, 24 and
-	 * 25 are three different menus for three viewers, and with no
-	 * `permissions` on the row every clause read false and every viewer
-	 * got the same one.
-	 */
+	// Rows are comments, not feeds: no space_id of their own, so they are scoped by the post's space.
 	const COMMENT_LIST_ROUTE = '/fcom-mobile/api/v1/feeds/comments';
 
 	public function register_hooks() {
-		// rest_request_after_callbacks fires inside WP_REST_Server::dispatch()
-		// after the route callback returns — so we catch both the outer
-		// serve_request() dispatch AND any rest_do_request() sub-calls (which
-		// only ever go through dispatch, never through serve_request).
+		// Not rest_post_dispatch: that misses rest_do_request() sub-calls from the preview proxy.
 		add_filter( 'rest_request_after_callbacks', [ $this, 'attach_permissions' ], 10, 3 );
 	}
 
@@ -81,9 +44,6 @@ class FluentCommunityFeedPermissionsFilter {
 		if ( ! $isCommentList && ! in_array( $route, self::ENRICHABLE_ROUTES, true ) ) {
 			return $response;
 		}
-		// FluentCommunity must be active — otherwise the Space/User classes
-		// we lean on for the capability check won't exist and this filter is
-		// a silent no-op.
 		if ( ! class_exists( '\\FluentCommunity\\App\\Services\\Helper' ) ) {
 			return $response;
 		}
@@ -97,20 +57,7 @@ class FluentCommunityFeedPermissionsFilter {
 		}
 		$items = $data['items'];
 
-		// An EMPTY list is a list, and must stay one.
-		//
-		// Without this, `looks_like_row_list([])` says false (there is no
-		// first key to inspect), the single-row branch below runs, and a
-		// zero-row response comes back as
-		// `items: {permissions: {...}}` — one object where there were no
-		// rows. Everything downstream then counts one row: hide_when_empty
-		// never fires, the empty-state verdict never publishes, and the
-		// screen paints a ghost card instead of "No matches".
-		//
-		// Caught on /feeds/bookmarks, where an empty result is an ordinary
-		// state (search for something you have not saved). /feeds has the
-		// same shape and the same latent bug; it simply never returns zero
-		// rows on a community with any content in it.
+		// An empty list must stay a list; the single-row branch would turn it into one ghost row.
 		if ( is_array( $items ) && empty( $items ) ) {
 			return $response;
 		}
@@ -126,7 +73,7 @@ class FluentCommunityFeedPermissionsFilter {
 			return $response;
 		}
 
-		// items may be an array of rows (list) OR a single row (create/patch/update).
+		// items may be a list of rows or a single row (create/patch/update).
 		if ( is_array( $items ) && $this->looks_like_row_list( $items ) ) {
 			foreach ( $items as $i => $row ) {
 				if ( is_array( $row ) ) {
@@ -143,12 +90,6 @@ class FluentCommunityFeedPermissionsFilter {
 		return $response;
 	}
 
-	/**
-	 * Heuristic — is $items a list of feed rows (numeric keys, first entry
-	 * has feed-shape) rather than a single feed row (associative keys)?
-	 * fcom-mobile's list endpoint returns a plain numeric-indexed array;
-	 * single-row endpoints return an associative array with `id`/`user_id`.
-	 */
 	protected function looks_like_row_list( array $items ) {
 		if ( empty( $items ) ) {
 			return false;
@@ -158,10 +99,8 @@ class FluentCommunityFeedPermissionsFilter {
 	}
 
 	/**
-	 * Compute + attach the permissions bag on a single feed row.
-	 *
 	 * @param array                                  $feed
-	 * @param \FluentCommunity\App\Models\User|null  $currentUser         Resolved lazily, reused across rows.
+	 * @param \FluentCommunity\App\Models\User|null  $currentUser
 	 * @param bool                                   $currentUserResolved
 	 * @param array<int, \FluentCommunity\App\Models\Space|null> $spaceCache
 	 */
@@ -201,47 +140,12 @@ class FluentCommunityFeedPermissionsFilter {
 
 			$canEdit   = $this->can_edit( $currentUser, $feed, $space );
 			$canDelete = $this->can_delete( $currentUser, $isAuthor, $space );
-			// "Move to a different space" — the edit screen's checkbox.
-			//
-			// Deliberately NOT the portal's own rule. FluentCommunity's
-			// edit modal shows that checkbox on
-			// `has_pro && hasSpaceModeratorAccess(feed.space)` — a
-			// MODERATOR — and then its own API refuses the write.
-			// FeedsController::update demands `community_admin` for both
-			// halves of the move: on the DESTINATION for `new_space_id`,
-			// on the post's current space for `move_to_profile`. A
-			// moderator who is not an admin gets "Sorry, you do not have
-			// permission to change the space for this post".
-			//
-			// So this is the SERVER's rule, not the portal's — the app
-			// never offers a control the API is going to reject.
-			//
-			// `$space` is null for a profile post, and
-			// hasPermissionOrInCurrentSpace then answers on the global
-			// permission alone. That is right: a profile post can still
-			// be moved INTO a space, and the destination's own admin
-			// check happens on the write.
+			// FC's API rule, not its edit modal's: FeedsController::update requires
+			// community_admin to move a post; the portal shows the checkbox to moderators too.
 			$canMove = (bool) $currentUser->hasPermissionOrInCurrentSpace( 'community_admin', $space );
 		}
 
-		// Every verdict below mirrors FluentCommunity's OWN rule, read out
-		// of its code rather than reasoned about — so the app offers a menu
-		// row exactly when the portal would, and never one the API will
-		// refuse. The three that are NOT simply `is_author`:
-		//
-		//   edit             Feed::hasEditAccess()  — author OR the
-		//                    `edit_any_feed` permission, space-scoped when
-		//                    the post lives in a space.
-		//   delete           User::canDeleteFeed()  — author OR
-		//                    `delete_any_feed`, community OR space scope.
-		//   disable comments FeedsController::patchFeed() — author OR
-		//                    moderator OR admin. Pin (top + sidebar) is
-		//                    moderator-only in the same method, which is
-		//                    why it is `can_moderate` and this is not.
-		//
-		// This used to read `is_author` for all three, which hid Edit and
-		// Delete from an admin looking at someone else's post — the exact
-		// case Noor's design 22 turns on.
+		// Pin is moderator-only in FeedsController::patchFeed(); disabling comments also allows the author.
 		$feed['permissions'] = [
 			'is_author'            => $isAuthor,
 			'can_edit'             => $canEdit,
@@ -250,49 +154,13 @@ class FluentCommunityFeedPermissionsFilter {
 			'can_pin'              => $canModerate,
 			'can_report'           => (bool) $currentUser && ! $isAuthor,
 			'can_disable_comments' => $isAuthor || $canModerate,
-			// "Remove Preview" (design 22). FluentCommunity guards
-			// deleteMediaPreview() with canDeleteFeed(), the same rule as
-			// deleting the post — so whoever may delete the post may strip
-			// its preview. The MENU row is additionally gated on the post
-			// actually having one; that is a property of the post, not of
-			// the viewer, so it is answered in the catalog's visible_when
-			// rather than folded in here.
+			// FC guards deleteMediaPreview() with canDeleteFeed().
 			'can_remove_preview'   => $canDelete,
-			// The edit screen's "Move to a different space" checkbox —
-			// see the derivation above. Rides the feed row because the
-			// edit screen is opened with the tapped post as its mount
-			// context, so the verdict is already in hand before the
-			// composer draws.
 			'can_move_space'       => $canMove,
-			// "Review" on the flagged banner (designs 28 and 34), and it
-			// is deliberately NOT `can_moderate`.
-			//
-			// fcom-mobile's /moderation/reports refuses anyone who is not
-			// a COMMUNITY moderator, and its own comment says why: Fluent
-			// Community Pro's endpoint paginates the whole moderation
-			// table while its policy only checks the caller's role in
-			// whatever space_id the request carried, so a single-space
-			// moderator would otherwise receive every report on the site.
-			//
-			// A space-scoped moderator therefore sees the flagged post
-			// (Feed::scopeByContentModerationAccessStatus lets them) but
-			// cannot read its reports. Gating the button on can_moderate
-			// would hand them one that opens an empty modal.
+			// Not can_moderate: /moderation/reports only answers community-wide moderators.
 			'can_review_reports'   => $this->can_review_reports( $currentUser ),
 		];
 
-		// Each inline COMMENT gets its own bag. Noor's item 24 gives the
-		// comment menu a different matrix from the post's, and it is a
-		// different matrix in FluentCommunity too:
-		//
-		//   edit    CommentsController::update() — author OR
-		//           `edit_any_comment` in the post's space.
-		//   delete  CommentsController::delete() — author OR
-		//           `delete_any_comment` in the post's space.
-		//   pin     CommentsController::patch()  — moderator or admin
-		//           ONLY. Not the author, which is where this differs
-		//           most from the post menu.
-		//   report  any signed-in reader who did not write it.
 		if ( ! empty( $feed['comments'] ) && is_array( $feed['comments'] ) ) {
 			foreach ( $feed['comments'] as $i => $comment ) {
 				if ( is_array( $comment ) ) {
@@ -310,13 +178,7 @@ class FluentCommunityFeedPermissionsFilter {
 	}
 
 	/**
-	 * The standalone comment list — the same per-comment bag the inline
-	 * strip already gets, computed once for the whole thread.
-	 *
-	 * ONE space lookup, not one per comment: every row in this response
-	 * belongs to the same post, so the post's space is a constant. Reading
-	 * it per row would issue a query per comment on a busy thread for an
-	 * answer that cannot change between them.
+	 * All rows belong to one post, so the post's space is looked up once.
 	 *
 	 * @param  array $items
 	 * @return array
@@ -328,10 +190,6 @@ class FluentCommunityFeedPermissionsFilter {
 
 		$user = \FluentCommunity\App\Services\Helper::getCurrentUser() ?: null;
 
-		// A guest gets a bag of falses rather than no bag at all. An absent
-		// `permissions` key and one full of falses read the same to the
-		// clause grammar, but only the second says so on purpose — and
-		// designs 19 and 20 are exactly that state: Copy link, nothing else.
 		$space       = null;
 		$canModerate = false;
 
@@ -366,6 +224,9 @@ class FluentCommunityFeedPermissionsFilter {
 	}
 
 	/**
+	 * Mirrors FC's CommentsController: edit/delete = author or *_any_comment in the post's space;
+	 * pin = moderator/admin only (not the author).
+	 *
 	 * @param array                                     $comment
 	 * @param \FluentCommunity\App\Models\User|null   $user
 	 * @param \FluentCommunity\App\Models\Space|null  $space  The POST's space — a comment has none of its own.
@@ -374,9 +235,6 @@ class FluentCommunityFeedPermissionsFilter {
 	 */
 	protected function comment_permissions( array $comment, $user, $space, $canModerate ) {
 		if ( ! $user ) {
-			// Signed out: every verdict false, which collapses the menu
-			// to Copy link on its own — the same rule the post menu
-			// follows for a guest (design 22's logout case).
 			return [
 				'is_author'          => false,
 				'can_edit'           => false,
@@ -402,24 +260,12 @@ class FluentCommunityFeedPermissionsFilter {
 			'can_delete' => $mayDelete,
 			'can_pin'    => (bool) $canModerate,
 			'can_report' => ! $isAuthor,
-			// Design 34's Review button, on the same terms as the post's.
-			// A comment's reports are read from the same endpoint with
-			// parent_id instead of post_id, so the same access rule holds.
 			'can_review_reports' => $this->can_review_reports( $user ),
 		];
 	}
 
 	/**
-	 * May this viewer READ moderation reports?
-	 *
-	 * `hasCommunityModeratorAccess()` is FluentCommunity's own community-
-	 * wide check, and it is the exact predicate fcom-mobile's
-	 * /moderation/reports gates on — so the app offers Review precisely
-	 * when the endpoint behind it will answer.
-	 *
-	 * Community-wide, not space-scoped: see the note on the bag above.
-	 * Fails closed for a signed-out viewer and for a site without the
-	 * method, because a Review button that 403s is worse than none.
+	 * Same predicate fcom-mobile's /moderation/reports gates on; fails closed.
 	 *
 	 * @param \FluentCommunity\App\Models\User|null $user
 	 */
@@ -431,9 +277,7 @@ class FluentCommunityFeedPermissionsFilter {
 	}
 
 	/**
-	 * Feed::hasEditAccess(), reimplemented against the ROW rather than the
-	 * model — the row is what we have, and re-finding every Feed to ask it
-	 * would be one query per card.
+	 * Feed::hasEditAccess(), evaluated on the row to avoid a query per card.
 	 *
 	 * @param \FluentCommunity\App\Models\User        $user
 	 * @param array                                     $feed
@@ -444,10 +288,7 @@ class FluentCommunityFeedPermissionsFilter {
 			return true;
 		}
 
-		// A post with a space asks the space; a profile post asks the
-		// community. FluentCommunity branches on `space_id` being set, not
-		// on the space resolving — a post pointing at a deleted space is
-		// not silently promoted to a community-wide question.
+		// FC branches on space_id being set, not on the space resolving.
 		if ( ! empty( $feed['space_id'] ) ) {
 			return $space ? (bool) $user->hasSpacePermission( 'edit_any_feed', $space ) : false;
 		}
@@ -456,9 +297,7 @@ class FluentCommunityFeedPermissionsFilter {
 	}
 
 	/**
-	 * User::canDeleteFeed(). Unlike edit, FluentCommunity checks BOTH
-	 * scopes here — a community-level `delete_any_feed` reaches a post in
-	 * any space.
+	 * User::canDeleteFeed(): unlike edit, a community-level delete_any_feed reaches any space.
 	 *
 	 * @param \FluentCommunity\App\Models\User        $user
 	 * @param bool                                      $isAuthor

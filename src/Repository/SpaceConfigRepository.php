@@ -1,11 +1,4 @@
 <?php
-/**
- * CRUD wrapper for wp_appza_space_config. Consumed by the admin
- * editor + the REST controller that persists edits. Enricher reads
- * this directly via wpdb for the hot path — no additional caching
- * layer at this scale (<= dozen spaces per site).
- */
-
 namespace AppzaCore\Plugin\Repository;
 
 use AppzaCore\Plugin\Schema\SpaceConfigSchema;
@@ -16,9 +9,7 @@ if ( ! defined( 'WPINC' ) ) {
 
 class SpaceConfigRepository {
 
-	/**
-	 * @return array<int, array{space_slug:string, config:array<string,mixed>, updated_at:string}>
-	 */
+	/** @return array<int, array{space_slug:string, config:array<string,mixed>, updated_at:string}> */
 	public function all() {
 		global $wpdb;
 		$table = SpaceConfigSchema::table_name();
@@ -38,9 +29,7 @@ class SpaceConfigRepository {
 		return $out;
 	}
 
-	/**
-	 * @return array<string, mixed>|null Config array (may be empty), or null if no row.
-	 */
+	/** @return array<string, mixed>|null */
 	public function get( string $slug ) {
 		global $wpdb;
 		$table = SpaceConfigSchema::table_name();
@@ -54,11 +43,7 @@ class SpaceConfigRepository {
 		return is_array( $decoded ) ? $decoded : array();
 	}
 
-	/**
-	 * Insert or update the row for $slug with the given config array.
-	 * Empty $config removes the row so the enricher returns the "no
-	 * overrides" empty object cleanly.
-	 */
+	/** An empty $config deletes the row. */
 	public function upsert( string $slug, array $config ): bool {
 		global $wpdb;
 		$table = SpaceConfigSchema::table_name();
@@ -88,13 +73,7 @@ class SpaceConfigRepository {
 		);
 	}
 
-	/**
-	 * List every FluentCommunity space (slug + title) so the admin
-	 * editor can present a picker. Reads wp_fcom_spaces directly to
-	 * avoid pulling FC's whole model layer for one query.
-	 *
-	 * @return array<int, array{slug:string, title:string}>
-	 */
+	/** @return array<int, array{slug:string, title:string}> */
 	public function list_spaces() {
 		global $wpdb;
 		$table = $wpdb->prefix . 'fcom_spaces';

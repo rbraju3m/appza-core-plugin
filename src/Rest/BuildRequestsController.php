@@ -1,36 +1,9 @@
 <?php
 /**
  * POST /wp-json/appza/v1/build-requests
- *   Body:
- *     {
- *       source_integration_slug: string,
- *       template_slug: string,
- *       base_url_mode: 'current' | 'custom',
- *       custom_base_url?: string | null
- *     }
- *   Returns:
- *     {
- *       id: int,
- *       resolved_base_url: string,
- *       template_slug: string,
- *       source_integration_slug: string,
- *       cli_command: string,
- *       requested_at: string (ISO 8601)
- *     }
  *
- * v0 storage: bounded JSON list in WP option `appza_build_requests_log`
- * (last N=50). No table yet — the full `wp_appza_build_requests` schema
- * comes with the App entity (see memory/Plans & Analysis/
- * appza-app-entity-spec.md).
- *
- * Why no server-side shell-exec of `pnpm build`:
- *   - Web PHP process runs as `www-data`; pnpm/node are user-installed
- *     under `rbs-02`'s NVM path (not on the PHP-FPM PATH).
- *   - The monorepo is owned by `rbs-02`, not `www-data` — no write.
- *   - No async job runner installed.
- * So this endpoint returns the exact CLI command Raju runs in a terminal.
- * When the App entity ships, this becomes a real queue-processor + async
- * status polling.
+ * Logs the request and returns the CLI command to run: PHP runs as www-data and cannot
+ * reach the user-installed node/pnpm or write to the monorepo.
  */
 
 namespace AppzaCore\Plugin\Rest;
@@ -91,8 +64,6 @@ class BuildRequestsController {
 			$resolved_url = esc_url_raw( $resolved_url );
 		}
 
-		// Gate the request against the site's actual activated SIs so a
-		// stale UI can't queue a build for something that was just turned off.
 		$active = get_option( ActiveSourceIntegrationsController::OPTION_KEY, array() );
 		if ( is_array( $active ) && ! in_array( $si_slug, $active, true ) ) {
 			return new \WP_Error(
@@ -130,8 +101,6 @@ class BuildRequestsController {
 	}
 
 	protected function build_cli_command( $base_url, $template_slug ) {
-		// Env vars consumed by @appza/mobile at Vite build time (VITE_APPZA_SITE_URL
-		// + VITE_APPZA_TEMPLATE) — see packages/mobile/src/App.tsx.
 		return sprintf(
 			"cd %s && VITE_APPZA_SITE_URL=%s VITE_APPZA_TEMPLATE=%s pnpm --filter @appza/mobile build",
 			escapeshellarg( self::MONOREPO_DIR ),

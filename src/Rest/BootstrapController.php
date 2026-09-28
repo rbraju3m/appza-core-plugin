@@ -1,20 +1,7 @@
 <?php
 /**
- * GET /wp-json/appza/v1/bootstrap?template=<slug>
- *
- * Single endpoint the APPZA mobile app calls on cold boot + foreground
- * revalidation. Returns the DC#13 Q5 envelope per appza-implementation-plan.md
- * § 4.13. Public-read v1 per DC#13 Q4 — no auth required.
- *
- * v1 behaviour: reads the local snapshot for the requested template_slug.
- * Empty-catalog branch when no snapshot row exists (first-install state):
- * envelope returns with catalog_snapshot_version = 0 and empty catalog arrays,
- * so the mobile app can render its onboarding / "site not configured yet"
- * state without erroring.
- *
- * Customizations always empty for v1 (wp_appza_customizations lands in
- * Phase 1B.5+). Auth block in runtime_config is empty until the JWT flow
- * lands (DC#13 Q4 — own phase).
+ * GET /wp-json/appza/v1/bootstrap?template=<slug> — public-read, cached per template.
+ * Never resolve per-viewer settings here: the answer would be whoever warmed the cache.
  */
 
 namespace AppzaCore\Plugin\Rest;
@@ -57,12 +44,6 @@ class BootstrapController {
 			? $this->normalize_catalog_shape( $snapshot['snapshot_blob'] )
 			: $this->empty_catalog( $template_slug );
 
-		// Features -> "Leaderboards Module" off takes the Leaderboard page
-		// out of the catalog entirely rather than leaving it to render an
-		// explanation. The hamburger drawer lists every template screen it
-		// is handed, so a screen left in place would be a live entry
-		// leading to a dead page — which is exactly what FluentCommunity
-		// does in its own portal sidebar when the module is off.
 		$catalog = $this->apply_feature_gates( $catalog );
 
 		$customizations_tree = $this->customizations->all_as_tree();
@@ -72,10 +53,7 @@ class BootstrapController {
 			'catalog_snapshot_version' => $snapshot ? (int) $snapshot['catalog_snapshot_version'] : 0,
 			'customizations_version'   => (int) $meta['customizations_version'],
 			'catalog'                  => $catalog,
-			// Real customizations payload — `scope -> target_key -> column ->
-			// override_value` nested object. Empty when no overrides exist
-			// (still {}, never []). Phase 1B.5a wires the read path; the
-			// admin UI to edit these ships in Phase 1B.5b.
+			// Must serialize as {} , never [].
 			'customizations'           => empty( (array) $customizations_tree )
 				? new \stdClass()
 				: $customizations_tree,
@@ -86,11 +64,8 @@ class BootstrapController {
 	}
 
 	/**
-	 * Restore object-shape for known leaf-bag fields after the repository's
-	 * json_decode($blob, true) collapsed `{}` to PHP empty array. Without
-	 * this, the round-trip Core -> WP-cache -> bootstrap response converts
-	 * object-shaped fields (tokens, screen_tokens) into JSON arrays,
-	 * breaking the wire contract documented in DC#09 / DC#10.
+	 * json_decode($blob, true) collapses `{}` to an empty array; restore object
+	 * shape so tokens/screen_tokens stay JSON objects on the wire.
 	 */
 	protected function normalize_catalog_shape( array $catalog ) {
 		if ( isset( $catalog['template'] ) && is_array( $catalog['template'] ) ) {
@@ -147,16 +122,8 @@ class BootstrapController {
 	}
 
 	/**
-	 * Drop screens whose feature is switched off in the Source
-	 * Integration's own settings.
-	 *
-	 * The Leaderboard and Saved Posts. The screen is removed rather than
-	 * flagged because the drawer is generated from `template_screens`:
-	 * anything left in the list is a tappable entry, and a page that
-	 * exists only to say the feature is off is worse than no page. The
-	 * AppZets and data sources stay in the snapshot — they are harmless
-	 * unreferenced rows, and pruning them would mean re-walking the
-	 * reachability graph on every bootstrap.
+	 * Remove screens whose feature is off: the drawer lists every template
+	 * screen, so a screen left in place would be a tappable dead entry.
 	 *
 	 * @param array<string, mixed> $catalog
 	 * @return array<string, mixed>
@@ -194,11 +161,6 @@ class BootstrapController {
 		return $catalog;
 	}
 
-	/**
-	 * Features -> "Courses / Learning Management". Every course screen
-	 * goes with it — the portal drops its Courses menu the same way, and
-	 * fcom-mobile's course routes answer nothing useful once it is off.
-	 */
 	protected function courses_enabled() {
 		if ( ! class_exists( '\\FluentCommunity\\App\\Services\\Helper' ) ) {
 			return false;
@@ -208,9 +170,8 @@ class BootstrapController {
 	}
 
 	/**
-	 * Features -> "Leaderboards Module", plus FluentCommunity Pro
-	 * actually being installed. The settings flag survives deactivating
-	 * Pro, and every leaderboard route goes through a Pro class.
+	 * The settings flag survives deactivating Pro, and every leaderboard
+	 * route goes through a Pro class — so check Pro is present too.
 	 */
 	protected function leaderboard_enabled() {
 		if ( ! class_exists( '\\FluentCommunityPro\\App\\Modules\\LeaderBoard\\Services\\LeaderBoardHelper' ) ) {
@@ -224,23 +185,8 @@ class BootstrapController {
 	}
 
 	/**
-	 * Settings -> Menu Settings -> Profile Dropdown Items -> Bookmarks ->
-	 * Edit Link -> "Enable this link".
-	 *
-	 * This is the switch Noor pointed at for the Saved Posts screen, and
-	 * it is the half of that dialog that can be answered here: whether
-	 * the link exists at all is a property of the site, not of who is
-	 * asking. The other half — Visibility — is per-viewer and is
-	 * deliberately NOT resolved in this method; see
-	 * fluent_community_settings() below.
-	 *
-	 * Read off the raw option rather than Helper::getMenuItemsGroup(),
-	 * which resolves the whole menu FOR THE CURRENT USER. Bootstrap is
-	 * public-read and cached per template, so a per-viewer answer
-	 * computed here would be whoever warmed the cache.
-	 *
-	 * Defaults to enabled: FluentCommunity ships Bookmarks on, and a site
-	 * that has never opened Menu Settings has no stored entry at all.
+	 * Menu Settings -> Bookmarks -> "Enable this link". Read from the raw option,
+	 * not Helper::getMenuItemsGroup(), which resolves the menu for the current user.
 	 */
 	protected function bookmarks_enabled() {
 		if ( ! class_exists( '\\FluentCommunity\\App\\Functions\\Utility' ) ) {
@@ -249,30 +195,22 @@ class BootstrapController {
 
 		$item = $this->bookmarks_menu_item();
 
-		// No stored entry means the site is running FluentCommunity's
-		// defaults, where the link is enabled.
+		// Never-saved Menu Settings means FC defaults, where Bookmarks is on.
 		if ( null === $item ) {
 			return true;
 		}
 
-		// FluentCommunity's own rule (Helper::isLinkAccessible): absent
-		// means yes, anything other than 'yes' means no.
+		// FC's rule (Helper::isLinkAccessible): absent means yes.
 		$enabled = isset( $item['enabled'] ) ? $item['enabled'] : 'yes';
 		if ( 'yes' !== $enabled ) {
 			return false;
 		}
 
-		// A link marked unavailable is one FluentCommunity itself has
-		// switched off underneath the admin's choice.
 		return ( isset( $item['is_unavailable'] ) ? $item['is_unavailable'] : 'no' ) !== 'yes';
 	}
 
 	/**
-	 * The stored Bookmarks entry from FluentCommunity's menu option, or
-	 * null when the site has never saved Menu Settings.
-	 *
-	 * The option stores profileDropdownItems as a LIST, and the admin can
-	 * reorder it, so the entry is found by slug rather than by position.
+	 * profileDropdownItems is a reorderable list, so match by slug, not position.
 	 *
 	 * @return array<string, mixed>|null
 	 */
@@ -301,10 +239,7 @@ class BootstrapController {
 	}
 
 	/**
-	 * Edit Link -> Visibility, raw.
-	 *
-	 * @return string public | logged_in | logged_out_only | members_only,
-	 *                or '' when the site has not set one.
+	 * @return string public | logged_in | logged_out_only | members_only, or ''.
 	 */
 	protected function bookmarks_visibility() {
 		$item = $this->bookmarks_menu_item();
@@ -316,9 +251,6 @@ class BootstrapController {
 	}
 
 	/**
-	 * Edit Link -> "Select Space/Course Memberships", read only when
-	 * Visibility is members_only.
-	 *
 	 * @return array<int, int>
 	 */
 	protected function bookmarks_membership_ids() {
@@ -331,15 +263,7 @@ class BootstrapController {
 	}
 
 	/**
-	 * Surface the FluentCommunity customization settings the mobile
-	 * renderer honors so the app matches whatever the site admin picked
-	 * in Settings → Customization: member_list_layout (classic = list,
-	 * grid = tile grid) plus, under `composer`, everything the create-post
-	 * screen branches on.
-	 *
-	 * Returns null when FluentCommunity isn't installed so the mobile
-	 * bootstrap loader can distinguish "no FC on this site" from
-	 * "FC present with default settings".
+	 * Null when FluentCommunity is absent, so the app can tell "no FC" from "FC defaults".
 	 *
 	 * @return array<string, string>|null
 	 */
@@ -353,65 +277,20 @@ class BootstrapController {
 
 		return array(
 			'member_list_layout'             => $layout,
-			// Features -> "Leaderboards Module". The screen is already
-			// gone from the catalog when this is false; the flag rides
-			// along so a shell can explain itself rather than silently
-			// missing a page.
 			'leaderboard_enabled'            => $this->leaderboard_enabled(),
-			// Privacy -> "Who can view leaderboard top members?", raw.
-			// Deliberately NOT resolved to a yes/no here: bootstrap is
-			// public-read and cached per template, so a per-viewer verdict
-			// computed at this point would be whoever warmed the cache.
-			// The verdict travels with the leaderboard payload instead,
-			// which is fetched per request and per viewer.
+			// Per-viewer: shipped raw; the verdict travels with the per-request leaderboard payload.
 			'leaderboard_members_visibility' => $this->leaderboard_visibility(),
-			// Menu Settings -> Bookmarks -> Edit Link, split the same way
-			// the two leaderboard switches are (D64).
-			//
-			// `enabled` is a property of the site, so the screen is
-			// already gone from the catalog when this is false; the flag
-			// rides along so a shell can explain itself rather than
-			// silently missing a page.
-			//
-			// `visibility` is a property of the VIEWER, so it is shipped
-			// raw and resolved where the auth state is actually known —
-			// the shells, which is also where FluentCommunity resolves it
-			// (its portal filters its own sidebar, not its settings).
-			// Resolving it here would bake whoever warmed the cache into
-			// every later response.
 			'bookmarks_enabled'              => $this->bookmarks_enabled(),
+			// Per-viewer: shipped raw and resolved by the shells.
 			'bookmarks_visibility'           => $this->bookmarks_visibility(),
 			'bookmarks_membership_ids'       => $this->bookmarks_membership_ids(),
-			// Everything the create-post composer branches on. Grouped
-			// rather than flattened because it is one screen's worth of
-			// settings read from four different FluentCommunity stores.
 			'composer'                       => $this->composer_settings(),
-			// Customization -> Feed Layout / Feed Sort By, plus the two
-			// switches that take the controls away from the user.
 			'feed'                           => $this->feed_settings(),
-			// Who may see the app at all without signing in. Raw, and
-			// resolved by the shells — see the note on the method.
 			'access'                         => $this->access_settings(),
 		);
 	}
 
 	/**
-	 * Settings -> Customization -> the feed block.
-	 *
-	 * Four keys Noor named directly (designs 20 + 21): the default layout
-	 * and sort, and the two switches that hide the pickers. All four have
-	 * lived in `customization_settings` since FluentCommunity shipped them
-	 * and were read by NOTHING on our side until this arc.
-	 *
-	 * Every value here is a property of the SITE. The one per-viewer part
-	 * of that screen — the "Following" sort row, which FluentCommunity Pro
-	 * appends only for a logged-in user on a site with the followers
-	 * module on — is deliberately NOT resolved here. Bootstrap is
-	 * public-read and cached per template, so an answer computed at this
-	 * point would be whoever warmed the cache (P105). The MODULE flag
-	 * ships instead, and the shells combine it with the auth state they
-	 * already hold.
-	 *
 	 * @return array<string, mixed>
 	 */
 	protected function feed_settings() {
@@ -421,11 +300,8 @@ class BootstrapController {
 		$layout = call_user_func( array( $utility, 'getCustomizationSetting' ), 'default_feed_layout' );
 		$layout = in_array( $layout, array( 'timeline', 'list', 'card' ), true ) ? $layout : 'timeline';
 
-		// The site's own sort list, MINUS anything a per-viewer filter
-		// added. FluentCommunity Pro's FollowHandler hooks
-		// `fluent_community/post_order_options` and appends `following`
-		// when `is_user_logged_in()` — running that here would bake the
-		// cache-warmer's session into every later bootstrap.
+		// FC Pro appends `following` only for a logged-in user; drop it so the
+		// cache-warmer's session isn't baked in. Shells re-add it from followers_module_enabled.
 		$sort_options = array();
 		if ( class_exists( $helper ) ) {
 			foreach ( (array) call_user_func( array( $helper, 'getPostOrderOptions' ), 'feed' ) as $value => $label ) {
@@ -441,11 +317,7 @@ class BootstrapController {
 
 		$sort_values  = wp_list_pluck( $sort_options, 'value' );
 		$default_sort = call_user_func( array( $utility, 'getCustomizationSetting' ), 'default_feed_sort_by' );
-		// FluentCommunity stores "no preference" as an empty string and
-		// the portal falls back to Latest. Keep the empty string on the
-		// wire rather than substituting — the shells need to tell "the
-		// admin picked Latest" from "the admin picked nothing", because
-		// only the first survives a future change of default.
+		// Keep '' (no preference) distinct from an explicit 'latest'.
 		$default_sort = in_array( $default_sort, $sort_values, true ) ? $default_sort : '';
 
 		$topics_config = class_exists( $helper )
@@ -458,39 +330,18 @@ class BootstrapController {
 			'default_sort_by'            => $default_sort,
 			'sort_change_disabled'       => 'yes' === call_user_func( array( $utility, 'getCustomizationSetting' ), 'disable_feed_sort_by' ),
 			'sort_options'               => $sort_options,
-			// Features -> Followers Module. Half of the "Following" sort
-			// row; the other half is the viewer being signed in.
 			'followers_module_enabled'   => class_exists( $helper )
 				? (bool) call_user_func( array( $helper, 'isFeatureEnabled' ), 'followers_module' )
 				: false,
-			// Features -> Content Moderation. Gates the whole In-Review
-			// surface (Noor's designs 27-34); when off, no post can be
-			// pending and the review affordances never draw.
 			'content_moderation_enabled' => class_exists( $helper )
 				? (bool) call_user_func( array( $helper, 'isFeatureEnabled' ), 'content_moderation' )
 				: false,
-			// Topics -> "Show topics on post card". The # pill in design 14.
 			'show_topic_on_post_card'    => 'no' !== ( $topics_config['show_on_post_card'] ?? 'yes' ),
 		);
 	}
 
 	/**
-	 * What a signed-OUT visitor is allowed to reach.
-	 *
-	 * Noor's rule for the guest arc: reachability follows the PORTAL, never
-	 * a list hardcoded in the app. If the admin locks the community down,
-	 * the app has to lock down with it — so these ship RAW and the shells
-	 * resolve them against the auth state they hold.
-	 *
-	 * `access_level` is FluentCommunity's own `access.acess_level`
-	 * (note its spelling — that typo is in their schema and is the real
-	 * key). `public` lets a guest read; `logged_in` and `role_based` do
-	 * not. The four privacy keys are the per-surface answers: a community
-	 * can be public while its member list is not.
-	 *
-	 * Resolving any of this here would be wrong twice over — bootstrap is
-	 * cached per template, and `role_based` is a question about a viewer
-	 * this request does not have.
+	 * Guest reachability, shipped raw for the shells to resolve against auth state.
 	 *
 	 * @return array<string, mixed>
 	 */
@@ -502,6 +353,7 @@ class BootstrapController {
 			? (array) call_user_func( array( $helper, 'generalSettings' ) )
 			: array();
 
+		// `acess_level` (sic) is FluentCommunity's real key.
 		$level = $general['access']['acess_level'] ?? 'public';
 
 		$privacy = array();
@@ -518,17 +370,7 @@ class BootstrapController {
 	}
 
 	/**
-	 * The create-post composer's feature gates.
-	 *
-	 * Mirrors FluentCommunity's own `PortalHandler::appVars()['features']`
-	 * — the portal composer reads exactly these, so reading anything else
-	 * would put the app and the portal out of step. Every value is a
-	 * property of the SITE. Per-viewer verdicts (may this user schedule a
-	 * post, send an announcement email, upload a video) are deliberately
-	 * NOT resolved here: bootstrap is public-read and cached per template,
-	 * so an answer computed at this point would be whoever warmed the
-	 * cache. Those ride the per-request payload instead, the same split
-	 * the leaderboard and bookmarks visibility settings use (D64).
+	 * Mirrors FC's PortalHandler::appVars()['features'], which the portal composer reads.
 	 *
 	 * @return array<string, mixed>
 	 */
@@ -536,21 +378,12 @@ class BootstrapController {
 		$utility = '\\FluentCommunity\\App\\Functions\\Utility';
 		$helper  = '\\FluentCommunity\\App\\Services\\Helper';
 
-		// 'disabled' | 'optional' | 'required'. FluentCommunity's
-		// postTitlePref() maps 'disabled' to an empty string (it is
-		// checked for truthiness at the call site) and runs the
-		// `fluent_community/has_post_title` filter — go through it so a
-		// site that filters the pref gets the same answer in the app as
-		// in its portal, then map the empty string back to a real word.
+		// postTitlePref() maps 'disabled' to '' and applies the has_post_title filter.
 		$title_pref = call_user_func( array( $utility, 'postTitlePref' ) );
 		$title_pref = in_array( $title_pref, array( 'optional', 'required' ), true ) ? $title_pref : 'disabled';
 
-		// The RAW customization setting, deliberately not run through
-		// `fluent_community/max_media_per_post`. Our own
-		// FluentCommunityMediaCap raises that filter to 20 so an edit
-		// cannot truncate a post that already carries more images than
-		// the site's limit — a repair valve, not the composer's rule.
-		// Reporting the filtered value would let the picker take 20.
+		// Raw setting on purpose: FluentCommunityMediaCap raises the
+		// max_media_per_post filter to 20 as an edit-repair valve.
 		$max_media = (int) call_user_func( array( $utility, 'getCustomizationSetting' ), 'max_media_per_post' );
 
 		$layout = call_user_func( array( $utility, 'getCustomizationSetting' ), 'rich_post_layout' );
@@ -561,21 +394,12 @@ class BootstrapController {
 
 		return array(
 			'post_title_pref'            => $title_pref,
-			// Settings → General → Global Post Status. When off there is
-			// no "On my profile" row on the space picker.
 			'global_posts_enabled'       => class_exists( $helper )
 				? (bool) call_user_func( array( $helper, 'hasGlobalPost' ) )
 				: false,
-			// Customization → Rich Media Post Layout. `modern` puts media
-			// above the author block, `classic` below the body.
 			'rich_post_layout'           => in_array( $layout, array( 'classic', 'modern' ), true ) ? $layout : 'classic',
 			'max_media_per_post'         => $max_media > 0 ? $max_media : 4,
-			// Settings → Email Notification → announcement mail. Whether
-			// the checkbox exists at all; whether THIS viewer may tick it
-			// is a moderator question answered per request.
 			'announcement_email_enabled' => (bool) call_user_func( array( $utility, 'hasEmailAnnouncementEnabled' ) ),
-			// FluentCommunity hardcodes has_survey_poll to true; kept as
-			// a key so a future switch has somewhere to land.
 			'survey_enabled'             => (bool) apply_filters( 'fluent_community/has_survey_poll', true ),
 			'video_embed_enabled'        => (bool) apply_filters( 'fluent_community/has_video_embeder', true ),
 			'inline_image_upload'        => 'yes' === apply_filters( 'fluent_community/has_inline_image_upload', 'yes' ),
@@ -586,12 +410,7 @@ class BootstrapController {
 	}
 
 	/**
-	 * FluentPlayer's half of the composer: the Upload Video tab and the
-	 * audio glyph both exist only because of it.
-	 *
-	 * `video_upload_role` ships RAW for the same reason
-	 * `bookmarks_visibility` does — it is a question about the viewer, and
-	 * the shells are where the auth state is actually known.
+	 * video_upload_role is per-viewer, so it ships raw.
 	 *
 	 * @return array<string, mixed>|null  null when the integration is absent.
 	 */
@@ -623,8 +442,7 @@ class BootstrapController {
 	}
 
 	/**
-	 * @return string everybody | logged_in | admin_only, or '' when
-	 *                FluentCommunity is not installed.
+	 * @return string everybody | logged_in | admin_only, or '' without FluentCommunity.
 	 */
 	protected function leaderboard_visibility() {
 		if ( ! class_exists( '\\FluentCommunity\\App\\Functions\\Utility' ) ) {

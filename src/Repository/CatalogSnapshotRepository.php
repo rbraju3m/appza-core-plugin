@@ -1,11 +1,4 @@
 <?php
-/**
- * Read / upsert for wp_appza_catalog_snapshot.
- *
- * Bootstrap endpoint calls find_by_template_slug() per cold-boot request.
- * Admin "Pull from Core" action calls upsert() after fetching from Core API.
- */
-
 namespace AppzaCore\Plugin\Repository;
 
 use AppzaCore\Plugin\Schema\CatalogSnapshotSchema;

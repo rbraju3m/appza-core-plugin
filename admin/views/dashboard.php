@@ -1,21 +1,5 @@
 <?php
-/**
- * APPZA Core admin dashboard view.
- *
- * Variables supplied by AdminMenu::render_dashboard():
- *   $meta               array — current row from wp_appza_catalog_meta
- *   $snapshots          array — rows from wp_appza_catalog_snapshot
- *   $default_template   string — pre-fills the pull form
- *   $pull_action_url    string — admin-post.php URL
- *   $pull_nonce         string — nonce for AdminController::PULL_ACTION
- *   $pull_action        string — admin-post action name
- *   $bootstrap_endpoint string — public REST URL clients hit on cold boot
- *   $core_api_url       string — Core API base URL (CoreUrl::raw)
- *   $core_url_source    string — constant | option | none
- *   $core_url_error     string — why the URL is unusable, or ''
- *   $last_pulled_from   string — Core URL of the last successful pull
- *   $url_action/$url_nonce, $test_action/$test_nonce — admin-post forms
- */
+/** Variables supplied by AdminMenu::render_sync(). */
 
 if ( ! defined( 'WPINC' ) ) {
 	die;

@@ -1,12 +1,4 @@
 <?php
-/**
- * Per-space runtime configuration table. One row per FluentCommunity space
- * slug, holding a JSON blob of AppZa overrides (switcher / subtabs / cover /
- * topics). Read at REST-dispatch time by FluentCommunitySpaceConfigEnricher
- * and attached to the space payload so the mobile renderer can apply the
- * overrides at render time.
- */
-
 namespace AppzaCore\Plugin\Schema;
 
 if ( ! defined( 'WPINC' ) ) {

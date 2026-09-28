@@ -2,25 +2,7 @@
 /**
  * GET /wp-json/fcom-mobile/api/v1/users/search
  *
- * Registered under the fcom-mobile namespace (not appza/v1) because the
- * mobile catalog treats this as a FluentCommunity data source and
- * always calls it via the fcom-mobile prefix. WordPress does not gate
- * register_rest_route by which plugin owns the namespace — we're
- * adding a route to that namespace, not editing the fcom-mobile
- * plugin (which is third-party and must stay unmodified per project
- * policy).
- *
- * Returns WP users that are NOT already an active member of the
- * given space, ranked by display_name. Response envelope mirrors the
- * fcom-mobile shape (response.status + data[]) so the same client
- * code can consume it interchangeably.
- *
- * Auth: requires a logged-in WP user (Basic Auth via Application
- * Passwords from the plugin-admin simulator, cookie auth from a
- * real browser session). The picker is only exposed on the MEMBERS
- * sub-tab of a space the current user is an admin of, so no
- * per-request capability check is layered on top — WP's login gate
- * is sufficient.
+ * Users not already active in the space, for the add-member picker.
  */
 
 namespace AppzaCore\Plugin\Rest;

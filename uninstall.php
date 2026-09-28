@@ -1,9 +1,4 @@
 <?php
-/**
- * Fired when the plug-in is uninstalled via the WP admin Plugins screen.
- * Drops APPZA Core's tables + removes its options.
- */
-
 if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {
 	exit;
 }

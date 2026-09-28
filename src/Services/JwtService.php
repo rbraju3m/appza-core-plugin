@@ -1,19 +1,6 @@
 <?php
 /**
- * Encodes + verifies the access + guest tokens issued by the appza/auth/v1
- * endpoints (DC#13 Q4). Refresh tokens are opaque random strings (NOT JWTs)
- * and live in `wp_appza_refresh_tokens` keyed by SHA-256 hash — see
- * RefreshTokenRepository.
- *
- * Verification returns the decoded claims as an array on success or a
- * WP_Error on failure (expired / signature mismatch / wrong issuer / wrong
- * audience / malformed). Callers translate the WP_Error to a 401 response.
- *
- * Uses a self-contained HS256 implementation (hash_hmac + hash_equals) so
- * we carry zero third-party JWT dep and stay compatible with PHP 7.4+.
- * Algorithm is locked to JwtConfig::ALGORITHM ('HS256'); any other `alg`
- * header — including `none` — is rejected as a bad signature to close
- * algorithm-confusion attacks.
+ * HS256 access/guest tokens. Refresh tokens are opaque strings (RefreshTokenRepository).
  */
 
 namespace AppzaCore\Plugin\Services;
@@ -24,12 +11,6 @@ if ( ! defined( 'WPINC' ) ) {
 
 class JwtService {
 
-	/**
-	 * Issues an access token for a WP user. `sub` is the user ID.
-	 *
-	 * @param int $user_id WP user ID.
-	 * @return string JWT.
-	 */
 	public function issue_access_token( int $user_id ): string {
 		$now = time();
 		return $this->encode( array(
@@ -43,12 +24,6 @@ class JwtService {
 		) );
 	}
 
-	/**
-	 * Issues a guest token. `sub` is 0 (no user); `type` is 'guest' so
-	 * action/data_source `auth_required: true` gates reject these tokens.
-	 *
-	 * @return string JWT.
-	 */
 	public function issue_guest_token(): string {
 		$now = time();
 		return $this->encode( array(
@@ -62,13 +37,7 @@ class JwtService {
 		) );
 	}
 
-	/**
-	 * Verifies a JWT against the current secret + expected issuer/audience.
-	 *
-	 * @param string $jwt The bearer token.
-	 * @return array|\WP_Error Decoded claims as assoc array on success;
-	 *                         WP_Error with code 'appza_jwt_*' on failure.
-	 */
+	/** @return array|\WP_Error */
 	public function verify( string $jwt ) {
 		if ( '' === $jwt ) {
 			return new \WP_Error( 'appza_jwt_empty', 'Empty JWT.', array( 'status' => 401 ) );
@@ -96,8 +65,7 @@ class JwtService {
 			return new \WP_Error( 'appza_jwt_malformed', 'JWT could not be decoded.', array( 'status' => 401 ) );
 		}
 
-		// Lock algorithm to JwtConfig::ALGORITHM. Anything else — including
-		// missing `alg`, `none`, or a swap to an asymmetric alg — fails here.
+		// Locked algorithm: rejects `none` and algorithm-confusion attacks.
 		if ( ( isset( $header['alg'] ) ? $header['alg'] : '' ) !== JwtConfig::ALGORITHM ) {
 			return new \WP_Error( 'appza_jwt_bad_signature', 'JWT signature is invalid.', array( 'status' => 401 ) );
 		}
@@ -145,9 +113,7 @@ class JwtService {
 		return rtrim( strtr( base64_encode( $data ), '+/', '-_' ), '=' );
 	}
 
-	/**
-	 * @return string|false Raw bytes, or false if the input isn't valid base64url.
-	 */
+	/** @return string|false */
 	private static function base64url_decode( string $data ) {
 		return base64_decode( strtr( $data, '-_', '+/' ), true );
 	}

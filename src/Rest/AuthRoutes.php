@@ -1,12 +1,5 @@
 <?php
-/**
- * Registers REST routes under appza/auth/v1 (DC#13 Q4).
- *
- * All five endpoints are public per the spec — login + refresh + guest +
- * logout don't need a pre-existing session, and /me carries its own
- * Bearer token. The Bearer middleware (chunk 4) skips this namespace
- * entirely so the auth routes can stand on their own.
- */
+/** All public: /me carries its own Bearer, and AuthMiddleware skips this namespace. */
 
 namespace AppzaCore\Plugin\Rest;
 

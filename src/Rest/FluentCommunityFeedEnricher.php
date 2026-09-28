@@ -1,54 +1,8 @@
 <?php
 /**
- * Normalizes fcom-mobile's feed responses for the renderer.
- *
- * Covers both the LIST (`/feeds`, which serves the home feed and the
- * space feed alike) and the SINGLE post (`/feeds/by/slug`, which powers
- * post-detail).
- *
- * Two jobs. The media normalization applies to every feed row on either
- * route; the list-wrapping applies only to the single-post route.
- *
- * ---------------------------------------------------------------------
- * 1. Return the post as a LIST of one  (/feeds/by/slug only)
- * ---------------------------------------------------------------------
- *
- * The route answers with `items` set to the feed row itself — a bare
- * object, not a list. Every other feed endpoint returns a list, and the
- * whole read path is built on that: the preview proxy hands `items`
- * straight through, and the renderer's fetch layer only recognizes an
- * array, a `{items: [...]}`, or a SINGLE-KEY wrapper it can unwrap (which
- * is how `/spaces/by/slug`'s `{space: {...}}` works). A multi-key bare
- * object matches none of those and resolves to ZERO rows, so the screen
- * renders empty with no error anywhere.
- *
- * Wrapping it here rather than teaching the fetch layer to accept bare
- * objects keeps that rule strict: "a DataSource resolves to a list" stays
- * true, and one endpoint's odd shape is corrected at the edge. It also
- * means the proxy's normalize_items() pass — relative timestamps,
- * reaction/comment summaries, images from meta, document files, viewer
- * reactions — runs over this post exactly as it does over the feed list,
- * so post-detail and the feed card agree without a second code path.
- *
- * ---------------------------------------------------------------------
- * 2. Publish `media_preview.video_url` for FluentPlayer uploads
- * ---------------------------------------------------------------------
- *
- * `fc-post-card` binds its video child to `meta.media_preview.video_url`
- * and its poster to `.image`, and shows that child only when
- * `media_preview.type == 'oembed'`. FluentCommunity fills those for a
- * real OEMBED (YouTube, Vimeo). A FluentPlayer UPLOAD carries the file on
- * `media_preview.url` (mirrored in `settings.src`) and sets no
- * `video_url`, so the binding resolved to nothing and the post showed no
- * video. An AUDIO post has no `media_preview` at all — its file lives on
- * `meta.audio_medias[]` — so it failed the visibility gate outright.
- *
- * Filling the fields the catalog already asks for means no field_mapping
- * change and no new child: one card renders oembeds, uploaded video and
- * uploaded audio. `video_url` is only ever written when absent, so a real
- * oembed is untouched.
- *
- * @package appza-core
+ * Normalizes fcom-mobile feed responses: /feeds/by/slug returns a bare multi-key object, which the
+ * renderer's fetch layer resolves to zero rows, so it is wrapped as a list of one. FluentPlayer uploads
+ * set no media_preview.video_url, which the post card binds, so it is filled from media_preview.url.
  */
 
 namespace AppzaCore\Plugin\Rest;
@@ -59,43 +13,23 @@ if ( ! defined( 'WPINC' ) ) {
 
 class FluentCommunityFeedEnricher {
 
-	/** One post, as a bare object. Powers post-detail. */
-	const ROUTE_SINGLE = '/fcom-mobile/api/v1/feeds/by/slug';
-
-	/** The feed list — serves both the home feed and a space's feed. */
-	const ROUTE_LIST = '/fcom-mobile/api/v1/feeds';
-
-	/**
-	 * The viewer's bookmarks — the Saved Posts screen (2026-08-19).
-	 *
-	 * Shaped exactly like ROUTE_LIST and drawn by the same card, so it
-	 * needs the same media pass: without it a saved FluentPlayer upload
-	 * or audio post renders as a card with a hole where its player is,
-	 * while the identical post on the feed plays.
-	 */
+	const ROUTE_SINGLE    = '/fcom-mobile/api/v1/feeds/by/slug';
+	const ROUTE_LIST      = '/fcom-mobile/api/v1/feeds';
 	const ROUTE_BOOKMARKS = '/fcom-mobile/api/v1/feeds/bookmarks';
-
-	/** Routes whose rows are a plain list of feed rows. */
-	const LIST_ROUTES = [ self::ROUTE_LIST, self::ROUTE_BOOKMARKS ];
+	const LIST_ROUTES      = [ self::ROUTE_LIST, self::ROUTE_BOOKMARKS ];
 
 	public function register_hooks() {
-		// rest_request_after_callbacks, like the sibling enrichers, so it
-		// also fires for the internal rest_do_request the simulator's
-		// preview proxy makes.
+		// Not rest_post_dispatch: must also fire for the simulator's internal rest_do_request.
 		add_filter( 'rest_request_after_callbacks', [ $this, 'reshape' ], 10, 3 );
 	}
 
 	/**
 	 * @param \WP_REST_Response|\WP_HTTP_Response|\WP_Error|mixed $response
-	 * @param array                                              $handler
-	 * @param \WP_REST_Request                                   $request
 	 */
 	public function reshape( $response, $handler, $request ) {
 		if ( ! $response instanceof \WP_REST_Response ) {
 			return $response;
 		}
-		// Exact comparison, so ROUTE_LIST does not also swallow
-		// ROUTE_SINGLE or ROUTE_BOOKMARKS (both are paths under it).
 		$route = (string) $request->get_route();
 		if ( self::ROUTE_SINGLE !== $route && ! in_array( $route, self::LIST_ROUTES, true ) ) {
 			return $response;
@@ -108,22 +42,14 @@ class FluentCommunityFeedEnricher {
 
 		$items = $data['items'];
 
-		// The single-post route hands back the row itself rather than a
-		// list. Wrap it, then treat it as a one-row list from here on so
-		// both routes share the media pass below.
-		//
-		// `isset($items[0])` distinguishes them: a list has a 0 key, a feed
-		// row does not. Guarding rather than trusting the route means a
-		// future fcom-mobile release that starts returning a proper list
-		// stops double-wrapping on its own.
+		// Guarded on isset($items[0]) so a future fcom-mobile that returns a list is not double-wrapped.
 		$wrapped_single = false;
 		if ( self::ROUTE_SINGLE === $route && ! isset( $items[0] ) ) {
 			$items          = array( $items );
 			$wrapped_single = true;
 		}
 
-		// The list route paginates on some callers, putting rows under
-		// `items.data` instead of directly on `items`.
+		// Some callers get paginated rows under items.data.
 		$paginated = ! $wrapped_single && ! isset( $items[0] ) && isset( $items['data'] ) && is_array( $items['data'] );
 		$rows      = $paginated ? $items['data'] : $items;
 		if ( ! is_array( $rows ) ) {
@@ -154,18 +80,7 @@ class FluentCommunityFeedEnricher {
 	}
 
 	/**
-	 * A never-empty label for the post-detail app bar.
-	 *
-	 * Most FluentCommunity posts are status-style and carry `title = ''`,
-	 * so binding the bar straight to the post title would leave it blank
-	 * on roughly half of them — and the renderer's field-mapping merger
-	 * skips null but NOT empty string, so the catalog default would not
-	 * rescue it either.
-	 *
-	 * Falls back the way the portal reads in context: the post's own
-	 * title, else the space it lives in, else a plain generic. Composed
-	 * here rather than in the renderer so the bar has one thing to bind
-	 * and no conditional.
+	 * Many FC posts have title '', and field_mapping does not fall back on empty strings.
 	 *
 	 * @param array<string, mixed> $row
 	 * @return array<string, mixed>
@@ -193,16 +108,7 @@ class FluentCommunityFeedEnricher {
 		}
 		$meta = $row['meta'];
 
-		// Audio is NOT handled here. It lives on `meta.audio_medias[]`, a
-		// list, because FluentPlayer allows several audios per post where
-		// it allows one video — and the post card now renders that array
-		// through its own child (children[29], appza-audio-list), one
-		// player per file.
-		//
-		// This used to synthesize a media_preview from the first entry so
-		// the video child could show it. That showed exactly one player no
-		// matter how many were attached, and now that the card handles the
-		// array properly, synthesizing would render the first audio TWICE.
+		// Audio (meta.audio_medias[]) is rendered by the card's own list; synthesizing here would show it twice.
 		if ( ! isset( $meta['media_preview'] ) || ! is_array( $meta['media_preview'] ) ) {
 			return $row;
 		}
@@ -212,7 +118,6 @@ class FluentCommunityFeedEnricher {
 		if ( ! empty( $mp['video_url'] ) ) {
 			return $row;
 		}
-		// Video only, for the reason above.
 		if ( empty( $mp['content_type'] ) || 'video' !== $mp['content_type'] ) {
 			return $row;
 		}
@@ -228,10 +133,6 @@ class FluentCommunityFeedEnricher {
 		}
 
 		$mp['video_url'] = $src;
-		// FluentCommunity splits video from audio on settings.viewType, the
-		// same rule the media gallery uses. Published so a client can tell
-		// them apart without re-deriving it; the renderer also infers from
-		// the file extension, so this is belt and braces.
 		$mp['media_kind'] = ( isset( $mp['settings']['viewType'] ) && 'audio' === $mp['settings']['viewType'] )
 			? 'audio'
 			: 'video';

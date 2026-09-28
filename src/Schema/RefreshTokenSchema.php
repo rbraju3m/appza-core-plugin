@@ -1,16 +1,5 @@
 <?php
-/**
- * DDL for wp_appza_refresh_tokens per DC#13 Q4.
- *
- * Refresh tokens are opaque random strings (NOT JWTs) — the plaintext is
- * returned to the client at issuance and never stored. The DB only keeps a
- * SHA-256 hash so a database leak can't be replayed as a valid token.
- *
- * 5 cols v1 — lean by design. Rotation = insert new + delete old; logout =
- * delete by hash. No `revoked_at` audit trail v1 (additive per P25 if audit
- * becomes a real need). No `device_id` v1 — multi-device flows just hold
- * one refresh token per device on the device.
- */
+/** Stores only a SHA-256 of each token, so a DB leak can't be replayed. */
 
 namespace AppzaCore\Plugin\Schema;
 

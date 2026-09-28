@@ -1,22 +1,8 @@
 <?php
 /**
- * GET  /wp-json/appza/v1/active-source-integrations
- *   → { slugs: string[] }  — the Source Integrations the site owner has
- *     activated via the onboarding wizard "Select App" step. Empty array
- *     on first install so the wizard auto-opens.
+ * GET/POST /wp-json/appza/v1/active-source-integrations
  *
- * POST /wp-json/appza/v1/active-source-integrations
- *   Body: { slugs: string[] } — full replacement of the active set. The
- *   list is validated against the Core's authoritative Source Integrations
- *   endpoint; unknown slugs are dropped silently rather than 400ing so a
- *   stale UI can't wedge itself.
- *
- * Storage: WP option `appza_core_active_source_integrations` (array of
- * slugs). Kept out of the wp_appza_* table space since this is per-site
- * config, not catalog data.
- *
- * Mutating writes require the standard REST cookie nonce (X-WP-Nonce)
- * and `manage_options` capability — same pattern as CustomizationsController.
+ * POST replaces the set; unknown slugs are dropped silently so a stale UI can't wedge itself.
  */
 
 namespace AppzaCore\Plugin\Rest;

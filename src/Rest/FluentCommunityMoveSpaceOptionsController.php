@@ -2,41 +2,8 @@
 /**
  * GET /wp-json/fcom-mobile/api/v1/feeds/move-space-options?feed_id=N
  *
- * The destination list behind the edit screen's "Move to a different
- * space" checkbox.
- *
- * Registered under the fcom-mobile namespace, like our users-search,
- * chat, documents, invitations and leaderboard routes — WordPress does
- * not gate register_rest_route by which plugin owns a namespace, and the
- * fcom-mobile plugin itself is third-party and stays unmodified.
- *
- * ⚠ This is NOT the create-post picker with a filter on it, and the
- * difference is the whole point. `/spaces/create-post-information-lean`
- * answers with the spaces the VIEWER may post in
- * (`appVars.auth.spaces`), which is what FluentCommunity's own edit
- * modal offers — and its own API then refuses half of them:
- *
- *   FeedsController::update, line 573
- *     if (!Helper::isUserInSpace($existingFeed->user_id, $newSpaceId))
- *         → "The author is not a member of the selected space"
- *
- * So the list is the POST AUTHOR's active memberships, not the viewer's.
- * The viewer's own half of the rule is applied too — `community_admin`
- * on the destination, from the very next check in the same method — so
- * every row this route emits is a move the server will actually accept.
- *
- * Response shape is deliberately identical to the composer picker's:
- *
- *   items: [ { spaces: [ { group_name, spaces: [ … ] } ], viewer: {…} } ]
- *
- * because the renderer's `fetchPostSpacePayload` already parses that,
- * and a second normaliser for one extra caller is a second thing to
- * drift (P100).
- *
- * The post's CURRENT space is left out. FluentCommunity's own select
- * renders it disabled; a sheet row that cannot be tapped says less than
- * a list that only offers real destinations, and the chip already shows
- * where the post is now.
+ * Lists the POST AUTHOR's spaces, not the viewer's: FC's FeedsController::update refuses a
+ * move when the author is not a member of the destination. Same shape as the composer picker.
  */
 
 namespace AppzaCore\Plugin\Rest;
@@ -86,10 +53,7 @@ class FluentCommunityMoveSpaceOptionsController {
 		$current_space_id = (int) $feed->space_id;
 		$author_id        = (int) $feed->user_id;
 
-		// The author's ACTIVE memberships — FluentCommunity's own
-		// `Helper::isUserInSpace` is exactly this query, so building the
-		// list from it means the offer and the acceptance cannot
-		// disagree.
+		// Same query as FC's Helper::isUserInSpace, so the offer matches what update accepts.
 		global $wpdb;
 		$space_ids = $wpdb->get_col(
 			$wpdb->prepare(
@@ -111,12 +75,7 @@ class FluentCommunityMoveSpaceOptionsController {
 
 		$groups = $space_ids ? $this->build_groups( $space_ids, $viewer, $is_moderator ) : array();
 
-		// "On my profile" / "On author's profile" — FluentCommunity's own
-		// two strings, chosen the same way its edit modal chooses them.
-		// The row is offered only when the post is currently IN a space
-		// (there is nowhere to move it from otherwise — FC disables the
-		// option on `!feed.space_id`) and when the site allows posts that
-		// belong to no space at all.
+		// FC offers "move to profile" only when the post is in a space and global posts are on.
 		$global_posts = class_exists( '\\FluentCommunity\\App\\Services\\Helper' )
 			&& (bool) call_user_func( array( '\\FluentCommunity\\App\\Services\\Helper', 'hasGlobalPost' ) );
 
@@ -141,12 +100,7 @@ class FluentCommunityMoveSpaceOptionsController {
 	}
 
 	/**
-	 * The author's spaces, grouped the way the portal groups them, with
-	 * every row the composer picker's normaliser expects.
-	 *
 	 * @param array<int, int> $space_ids
-	 * @param object          $viewer
-	 * @param bool            $is_moderator
 	 * @return array<int, array<string, mixed>>
 	 */
 	protected function build_groups( array $space_ids, $viewer, $is_moderator ) {
@@ -162,9 +116,7 @@ class FluentCommunityMoveSpaceOptionsController {
 		$parent_ids = array();
 
 		foreach ( $spaces as $space ) {
-			// The viewer's half of FluentCommunity's rule. Its own edit
-			// modal skips this and lets the API say no; we would rather
-			// not draw the row.
+			// FC's update also requires community_admin on the destination.
 			if ( ! $viewer->hasPermissionOrInCurrentSpace( 'community_admin', $space ) ) {
 				continue;
 			}
@@ -185,9 +137,6 @@ class FluentCommunityMoveSpaceOptionsController {
 					'privacy'     => (string) ( $space->privacy ?: 'public' ),
 					'logo'        => (string) ( $space->logo ?: '' ),
 					'settings'    => array( 'emoji' => (string) ( $settings['emoji'] ?? '' ) ),
-					// Every row here is a destination the server will
-					// accept, so none of them is dimmed. `can_create_post`
-					// is what the sheet reads for that.
 					'permissions' => array(
 						'can_create_post'      => true,
 						'community_moderator'  => ! empty( $permissions['community_moderator'] ),
@@ -227,11 +176,7 @@ class FluentCommunityMoveSpaceOptionsController {
 	 * @return array<int, string>  id => title
 	 */
 	protected function group_titles( array $parent_ids ) {
-		// SpaceGroup, NOT BaseSpace. BaseSpace carries
-		// `protected static $type = 'community'` and a global scope
-		// built from it, so `BaseSpace::whereIn('id', …)` silently
-		// matches no space GROUP at all — every row lands under
-		// "Others" and the grouping looks like it was never wired.
+		// SpaceGroup, not BaseSpace: BaseSpace's global type scope silently matches no group.
 		if ( ! $parent_ids || ! class_exists( '\\FluentCommunity\\App\\Models\\SpaceGroup' ) ) {
 			return array();
 		}
@@ -245,15 +190,7 @@ class FluentCommunityMoveSpaceOptionsController {
 		return $titles;
 	}
 
-	/**
-	 * The chips the composer would draw for this space, dropping the
-	 * admin-only ones for anyone who is not a moderator — the same rule
-	 * FluentCommunityComposerEnricher applies to the create-post picker.
-	 *
-	 * @param object $space
-	 * @param bool   $is_moderator
-	 * @return array<int, array<string, string>>
-	 */
+	/** @return array<int, array<string, string>> */
 	protected function space_topics( $space, $is_moderator ) {
 		if ( ! class_exists( '\\FluentCommunity\\App\\Functions\\Utility' ) ) {
 			return array();

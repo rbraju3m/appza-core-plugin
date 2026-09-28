@@ -1,14 +1,4 @@
 <?php
-/**
- * Mount point for the React simulator.
- *
- * The script + style are enqueued by AssetLoader from the built bundle
- * in assets/admin/. This view just outputs the root element.
- *
- * Full-bleed wrapper (no WP `.wrap` margins) so the React app owns the
- * whole admin canvas — matches the legacy appza-builder UX.
- */
-
 if ( ! defined( 'WPINC' ) ) {
 	die;
 }

@@ -1,58 +1,7 @@
 <?php
 /**
- * Chat — the space CHAT tab and the one-to-one conversation screen.
- *
- *   GET  /wp-json/fcom-mobile/api/v1/chat/thread
- *   GET  /wp-json/fcom-mobile/api/v1/chat/messages
- *   POST /wp-json/fcom-mobile/api/v1/chat/threads/delete
- *
- * Registered under the fcom-mobile namespace from our plugin, the same
- * call the invitations, users-search and documents controllers make
- * (P68). fcom-mobile is third-party and is never edited.
- *
- * Why these three and not fcom-mobile's own:
- *
- *   1. `/chat/spaces/messages` throws `threadDetails` away. FC composes
- *      it in ChatHelper::transformThread() and it is the entire top of
- *      both designs — title, photo, and the permission bag
- *      (can_send_message / can_view_members / can_delete_any_messages),
- *      plus `blocked_thread` / `left_thread` and `info.last_activity`,
- *      which FC has ALREADY blanked unless it is inside five minutes.
- *      That field is the "Active now" line in designs 5 and 6; there is
- *      nothing else to compute it from.
- *
- *   2. Every fcom-mobile chat route is addressed by numeric thread id.
- *      The space CHAT tab only ever knows a slug, so opening it would
- *      cost a round trip to resolve the thread before the first fetch.
- *      Both read routes here take `thread_id` OR `space_slug` OR
- *      `user_id`.
- *
- *   3. There is no delete-thread wrapper at all. FC has
- *      `chat/threads/delete/{id}`; fcom-mobile never exposed it, and
- *      design 9 needs it.
- *
- * Writes that fcom-mobile DOES wrap are used as-is and are absent here:
- * messages/add (it passes `reply_to` / `reply_text` straight through),
- * messages/delete, threads/leave, threads/block, threads/unblock,
- * chat/spaces/members.
- *
- * ---------------------------------------------------------------------
- * Two field-naming rules the preview proxy imposes
- * ---------------------------------------------------------------------
- *
- * `created_at` — the proxy rewrites ANY string in that key through its
- * own relative_time(), whose scale jumps from days straight to months.
- * The designs show "2w". So the label is computed here and shipped as
- * `time_label`; the raw stamp rides as `created_at_iso`, which the
- * proxy does not touch.
- *
- * `message_rendered` — the proxy runs that key through wp_kses with a
- * small inline allow-list, which is what makes the renderer's
- * appza-rich-text innerHTML sink safe. FC stores a chat message as
- * `<div class="chat_text">…</div>` plus an optional `<div
- * class="chat_medias"><img …></div>`; both wrappers would be stripped
- * and the images lost. So the two halves are split here — prose into
- * `message_rendered`, image URLs into `images[]`.
+ * Chat routes in the fcom-mobile namespace: fcom-mobile drops threadDetails and addresses threads by numeric id only.
+ * The preview proxy rewrites `created_at` and kses-strips `message_rendered`, hence `time_label` and the split `images[]`.
  */
 
 namespace AppzaCore\Plugin\Rest;
@@ -63,23 +12,11 @@ if ( ! defined( 'WPINC' ) ) {
 
 class FluentCommunityChatController {
 
-	/**
-	 * Messages per page. FC's own default is 20; the design fills a
-	 * phone screen with roughly a dozen, and there is no "load older"
-	 * control yet, so a slightly deeper first page keeps scrollback
-	 * useful without paying for it twice.
-	 */
 	private const PER_PAGE = 30;
 
-	/** Seconds within which FC still considers a profile "active now". */
 	private const ACTIVE_WINDOW = 300;
 
-	/**
-	 * `object_source` we stamp on a chat upload the moment it lands, so
-	 * an abandoned one can be told apart from an abandoned post upload.
-	 * FluentCommunity overwrites it with 'chat_message' when a message
-	 * claims the file.
-	 */
+	/** Stamped on our chat uploads; FC overwrites it with 'chat_message' when a message claims the file. */
 	private const PENDING_SOURCE = 'chat_message_pending';
 
 	public function register_hooks() {
@@ -133,18 +70,7 @@ class FluentCommunityChatController {
 		return PortalGuard::member();
 	}
 
-	/* ---------------------------------------------------------------
-	 * GET /chat/thread
-	 * ------------------------------------------------------------- */
-
-	/**
-	 * One thread, flattened to leaf keys, as a list of one.
-	 *
-	 * A list of one rather than a bare object because the preview proxy
-	 * resolves every DataSource to an array of items and a bare object
-	 * reads downstream as zero rows — the same wrapping the feed-by-slug
-	 * enricher had to add.
-	 */
+	/** A list of one: the preview proxy reads a bare object as zero rows. */
 	public function thread( \WP_REST_Request $request ) {
 		if ( ! $this->chat_available() ) {
 			return $this->ok( array() );
@@ -163,17 +89,7 @@ class FluentCommunityChatController {
 		return $this->ok( array( $this->present_thread( $thread, $viewer ) ) );
 	}
 
-	/* ---------------------------------------------------------------
-	 * GET /chat/messages
-	 * ------------------------------------------------------------- */
-
-	/**
-	 * Messages oldest-first, which is the order they render in.
-	 *
-	 * FC returns newest-first because its cursor walks backwards; the
-	 * reversal happens after the slice so `before_id` still means "the
-	 * page above this one".
-	 */
+	/** Oldest-first; FC walks newest-first, so reverse after slicing to keep `before_id` meaning "the page above". */
 	public function messages( \WP_REST_Request $request ) {
 		if ( ! $this->chat_available() ) {
 			return $this->ok( array() );
@@ -196,9 +112,7 @@ class FluentCommunityChatController {
 		$query = \FluentMessaging\App\Models\Message::where( 'thread_id', $thread->id )
 			->orderBy( 'id', 'DESC' );
 
-		// A community thread hides messages from profiles that are no
-		// longer active, exactly as FC's own listing does — otherwise a
-		// banned member's posts stay in every space conversation.
+		// Hide messages from inactive profiles, as FC's own listing does.
 		if ( $thread->space_id ) {
 			$query->whereHas(
 				'xprofile',
@@ -211,7 +125,6 @@ class FluentCommunityChatController {
 			$query->where( 'id', '<', $before_id );
 		}
 
-		// One extra row answers "is there an older page" without a count.
 		$rows     = $query->limit( $per_page + 1 )->get();
 		$has_more = $rows->count() > $per_page;
 		if ( $has_more ) {
@@ -234,14 +147,7 @@ class FluentCommunityChatController {
 				$profiles[ $uid ] ?? null,
 				$viewer,
 				$can_delete_any,
-				// A run is a block of consecutive messages by one
-				// author. The design puts the name above the FIRST of a
-				// run and the avatar beside the LAST — so these are two
-				// different flags, not one.
-				//
-				// Both are computed per page, so a run split across a
-				// page boundary repeats its header. Harmless while there
-				// is no "load older" control; revisit with one.
+				// The name sits above the first message of a run, the avatar beside the last.
 				$uid !== $prev_uid,
 				$uid !== $next
 			);
@@ -259,28 +165,9 @@ class FluentCommunityChatController {
 		);
 	}
 
-	/* ---------------------------------------------------------------
-	 * POST /chat/messages/send
-	 * ------------------------------------------------------------- */
-
 	/**
-	 * Send a message.
-	 *
-	 * fcom-mobile's /chat/messages/add would do, except that it takes a
-	 * numeric thread id — and the space CHAT tab only ever has a slug.
-	 * Rather than make the client resolve the thread before every send,
-	 * or thread a resolved id through renderer state where it would
-	 * outlive the screen that produced it, this takes the same
-	 * thread_id-or-space_slug pair both read routes take.
-	 *
-	 * `reply_to` / `reply_text` and `media` pass through to FC unchanged:
-	 * FC stores the reply on the message meta and re-resolves each media
-	 * URL back to its Media row, so nothing here needs to understand
-	 * either.
-	 *
-	 * The write goes over loopback HTTP, not a nested dispatch, because
-	 * FluentCommunity reads its payload from php://input — a nested call
-	 * would reach it carrying OUR body (P78).
+	 * Takes thread_id or space_slug; fcom-mobile's messages/add needs a numeric id.
+	 * Loopback HTTP, not a nested dispatch: FC reads its payload from php://input.
 	 */
 	public function send( \WP_REST_Request $request ) {
 		if ( ! $this->chat_available() ) {
@@ -316,8 +203,7 @@ class FluentCommunityChatController {
 		$reply_to = (int) $request->get_param( 'reply_to' );
 		if ( $reply_to > 0 ) {
 			$payload['reply_to'] = $reply_to;
-			// FC stores the quoted text verbatim rather than re-reading
-			// the replied-to message, so the client sends what it showed.
+			// FC stores the quoted text verbatim, so the client sends what it showed.
 			$payload['reply_text'] = (string) $request->get_param( 'reply_text' );
 		}
 
@@ -347,36 +233,9 @@ class FluentCommunityChatController {
 		);
 	}
 
-	/* ---------------------------------------------------------------
-	 * POST /chat/messages/remove
-	 * ------------------------------------------------------------- */
-
 	/**
-	 * Delete a message AND the image it carried.
-	 *
-	 * FluentCommunity's own delete drops the message row and stops
-	 * there — the Media row stays active and the file stays on disk, so
-	 * every deleted image message leaves an orphan behind. Nothing links
-	 * the two back together afterwards either: chat media is stored with
-	 * `feed_id` set to the THREAD, not the message, so once the message
-	 * text is gone there is no way to tell which file belonged to it.
-	 * The sweep therefore has to read the message BEFORE it is deleted,
-	 * which is why this is a route of its own rather than a filter on
-	 * the way out.
-	 *
-	 * Named `/remove` rather than `/delete` only because fcom-mobile
-	 * already owns `/chat/messages/delete` in this namespace, and
-	 * registering the same route twice leaves which callback answers up
-	 * to registration order.
-	 *
-	 * The delete itself is delegated to fcom-mobile's route so FC's own
-	 * before/after hooks and broadcast still run; this adds the sweep on
-	 * either side of it and nothing else.
-	 *
-	 * Media::delete() unlinks the file through its `deleting` hook, so
-	 * the row and the file go together. FC's own thread-delete settles
-	 * for `is_active = 0`, which leaves the file — worth deviating from,
-	 * since the whole point here is not to leave one.
+	 * FC's delete leaves the Media row and file behind, and chat media is keyed to the thread, so read attachments first.
+	 * Named /remove because fcom-mobile already owns /chat/messages/delete in this namespace.
 	 */
 	public function remove( \WP_REST_Request $request ) {
 		if ( ! $this->chat_available() ) {
@@ -396,8 +255,7 @@ class FluentCommunityChatController {
 			return $this->error( 403, __( 'You do not have access to this conversation.', 'appza-core' ) );
 		}
 
-		// Mirror FC's own guards rather than trusting the client, so this
-		// route can never delete something its own route would refuse.
+		// Mirror FC's guards so this route never deletes what FC would refuse.
 		$meta = is_array( $message->meta ) ? $message->meta : array();
 		if ( ! empty( $meta['system_event'] ) ) {
 			return $this->error( 400, __( 'System messages cannot be deleted.', 'appza-core' ) );
@@ -435,11 +293,7 @@ class FluentCommunityChatController {
 		);
 	}
 
-	/**
-	 * The `src` of every image in a stored chat message.
-	 *
-	 * @return array<int, string>
-	 */
+	/** @return array<int, string> */
 	private function image_urls_in( string $html ): array {
 		if ( ! preg_match_all( '/<img[^>]+src=["\']([^"\']+)["\']/i', $html, $m ) ) {
 			return array();
@@ -455,13 +309,7 @@ class FluentCommunityChatController {
 	}
 
 	/**
-	 * Delete the Media rows behind the given URLs, file included.
-	 *
-	 * Scoped to this thread's chat media, so a malformed URL cannot reach
-	 * a post's attachment or another conversation's. And skipped whenever
-	 * a surviving message in the thread still shows the same image —
-	 * sending one uploaded file twice is enough to make that real, and
-	 * the second message would be left pointing at a deleted file.
+	 * Scoped to this thread's chat media; skips a file a surviving message still shows (same upload sent twice).
 	 *
 	 * @param array<int, string> $urls
 	 */
@@ -483,8 +331,7 @@ class FluentCommunityChatController {
 				->get();
 
 			foreach ( $rows as $row ) {
-				// Fires the model's `deleting` hook, which unlinks the
-				// local file — the row and the file go together.
+				// Media::delete() unlinks the file via its deleting hook.
 				$row->delete();
 				$swept++;
 			}
@@ -498,22 +345,7 @@ class FluentCommunityChatController {
 		return $wpdb->esc_like( $value );
 	}
 
-	/* ---------------------------------------------------------------
-	 * POST /chat/media/discard  +  the scheduled sweep
-	 * ------------------------------------------------------------- */
-
-	/**
-	 * Throw away an image that was uploaded but never sent.
-	 *
-	 * FluentCommunity creates the Media row at UPLOAD time, not at send
-	 * time, so a composer the user changes their mind about leaves a row
-	 * and a file behind that nothing will ever reference. Tapping the ×
-	 * on a pending thumbnail comes here.
-	 *
-	 * Ownership, not just access: only the uploader can discard, so one
-	 * member of a conversation cannot delete another's pending file by
-	 * guessing a media_key.
-	 */
+	/** FC creates the Media row at upload time, so an unsent image must be discarded. Uploader only. */
 	public function discard_media( \WP_REST_Request $request ) {
 		if ( ! class_exists( '\FluentCommunity\App\Models\Media' ) ) {
 			return $this->error( 400, __( 'Media is not available on this site.', 'appza-core' ) );
@@ -522,8 +354,6 @@ class FluentCommunityChatController {
 		$viewer = get_current_user_id();
 		$key    = trim( (string) $request->get_param( 'media_key' ) );
 		if ( '' === $key ) {
-			// The client holds the URL the upload returned, which carries
-			// the key as a query arg.
 			$url = (string) $request->get_param( 'url' );
 			if ( '' !== $url ) {
 				$query = wp_parse_url( $url, PHP_URL_QUERY );
@@ -538,15 +368,12 @@ class FluentCommunityChatController {
 		$media = \FluentCommunity\App\Models\Media::where( 'media_key', $key )->first();
 
 		if ( ! $media ) {
-			// Already gone — the caller wanted it gone, so say yes.
 			return $this->ok_message( __( 'Attachment discarded', 'appza-core' ), array( 'discarded' => 0 ) );
 		}
 		if ( (int) $media->user_id !== $viewer ) {
 			return $this->error( 403, __( 'That attachment is not yours to discard.', 'appza-core' ) );
 		}
-		// Only ever a PENDING upload of ours. The × means "unsend this
-		// one I have not sent"; a client passing the wrong key must not
-		// be able to reach a sent message's image, or a post's.
+		// Only a PENDING upload, so a wrong key can't reach a sent message's or a post's image.
 		if ( self::PENDING_SOURCE !== (string) $media->object_source ) {
 			return $this->error( 409, __( 'That attachment is already part of a message.', 'appza-core' ) );
 		}
@@ -559,23 +386,7 @@ class FluentCommunityChatController {
 		return $this->ok_message( __( 'Attachment discarded', 'appza-core' ), array( 'discarded' => 1 ) );
 	}
 
-	/**
-	 * Delete chat images that were uploaded, never sent, and are old
-	 * enough that nobody is still composing with them.
-	 *
-	 * The explicit discard above covers the user who changes their mind.
-	 * This covers everything else — an app killed mid-compose, a lost
-	 * connection between the upload and the send — which no client-side
-	 * call can reach. Runs daily on WP-cron.
-	 *
-	 * @param int $older_than Seconds an upload must have survived before
-	 *                        it counts as abandoned. Two hours is far
-	 *                        past any real compose, so an in-progress
-	 *                        message is never at risk.
-	 * @param int $limit      Rows examined per run, so one pass can never
-	 *                        become an unbounded job on a busy site.
-	 * @return int            How many were swept.
-	 */
+	/** Daily WP-cron sweep of pending chat uploads that were never sent (app killed mid-compose, lost connection). */
 	public function sweep_abandoned_media( int $older_than = 7200, int $limit = 200 ): int {
 		if ( ! class_exists( '\FluentCommunity\App\Models\Media' ) || ! $this->chat_available() ) {
 			return 0;
@@ -583,10 +394,7 @@ class FluentCommunityChatController {
 
 		$cutoff = gmdate( 'Y-m-d H:i:s', time() - max( 60, $older_than ) );
 
-		// Only our own pending uploads. A row FluentCommunity has already
-		// claimed is a sent message's image and belongs to the
-		// conversation; a row with no marker at all belongs to some other
-		// composer entirely, very likely a post draft.
+		// Only our pending marker: an unmarked row may be a post draft's image.
 		$candidates = \FluentCommunity\App\Models\Media::where( 'object_source', self::PENDING_SOURCE )
 			->where( 'created_at', '<', $cutoff )
 			->orderBy( 'id' )
@@ -598,7 +406,6 @@ class FluentCommunityChatController {
 			if ( $this->media_is_referenced( (string) $media->media_url, (int) $media->feed_id ) ) {
 				continue;
 			}
-			// Row and file together — see the note on sweep_media().
 			$media->delete();
 			$swept++;
 		}
@@ -606,14 +413,7 @@ class FluentCommunityChatController {
 		return $swept;
 	}
 
-	/**
-	 * Is any message in this conversation still showing this file?
-	 *
-	 * Scoped to the thread because that is the only place a chat image
-	 * can be referenced — FC stores chat media with `feed_id` set to the
-	 * thread — and an unscoped LIKE over every message would be a table
-	 * scan per candidate.
-	 */
+	/** Thread-scoped: FC stores chat media with feed_id = thread, and an unscoped LIKE would scan every message. */
 	private function media_is_referenced( string $media_url, int $thread_id ): bool {
 		if ( '' === $media_url ) {
 			return false;
@@ -623,27 +423,7 @@ class FluentCommunityChatController {
 			->exists();
 	}
 
-	/* ---------------------------------------------------------------
-	 * POST /chat/messages/upload
-	 * ------------------------------------------------------------- */
-
-	/**
-	 * One image, uploaded ahead of the message that will carry it.
-	 *
-	 * FC's own media_upload route is addressed by numeric thread id and
-	 * fcom-mobile never wrapped it, so this is the slug-addressable
-	 * front door — the same two reasons the read routes above exist.
-	 *
-	 * The nested dispatch is safe here even though P78 says writes go
-	 * over loopback: FluentCommunity's UploadHelper reads `$_FILES`
-	 * directly rather than the request object, and this IS the outermost
-	 * HTTP request, so the superglobal is already the real multipart
-	 * body. The documents upload takes the same route for the same
-	 * reason.
-	 *
-	 * Returns the media URL, which is what `mediaItems` on the send call
-	 * expects — FC re-resolves the Media row from it.
-	 */
+	/** Nested dispatch is safe here: FC's UploadHelper reads $_FILES directly, not php://input. */
 	public function upload( \WP_REST_Request $request ) {
 		if ( ! $this->chat_available() ) {
 			return $this->error( 400, __( 'Chat is not available on this site.', 'appza-core' ) );
@@ -678,20 +458,8 @@ class FluentCommunityChatController {
 			return $this->error( 400, $message );
 		}
 
-		// Mark the row as OURS and unclaimed.
-		//
-		// FluentCommunity creates the Media row here, at upload, and only
-		// stamps object_source / feed_id when a message finally claims it.
-		// Until then an abandoned chat upload is indistinguishable from an
-		// abandoned POST upload — same empty object_source, same null
-		// feed_id — so a sweep written against that shape would also bin
-		// the image a half-written post draft is holding in the portal.
-		//
-		// Stamping a marker of our own makes the sweep exact: it only ever
-		// looks at uploads this route made. FC's claim path finds media by
-		// media_key with no object_source filter, so it still overwrites
-		// this to 'chat_message' on send — a claimed row leaves the pending
-		// state by itself, with nothing here to keep in step.
+		// Mark our upload pending: until a message claims it, FC's row looks exactly like a post draft's upload.
+		// FC's claim path matches by media_key alone, so it still overwrites this on send.
 		if ( ! empty( $body['media_key'] ) && class_exists( '\FluentCommunity\App\Models\Media' ) ) {
 			try {
 				\FluentCommunity\App\Models\Media::where( 'media_key', (string) $body['media_key'] )
@@ -724,19 +492,7 @@ class FluentCommunityChatController {
 		);
 	}
 
-	/* ---------------------------------------------------------------
-	 * POST /chat/threads/delete
-	 * ------------------------------------------------------------- */
-
-	/**
-	 * Design 9 — delete for both participants.
-	 *
-	 * FC's own deleteThread refuses anything with a space_id, which is
-	 * the rule we want: a community conversation belongs to the space,
-	 * not to either member, and leaving is the affordance for that
-	 * (design 4). The guard is repeated here so the refusal comes back
-	 * as our envelope rather than FC's.
-	 */
+	/** DMs only: a community thread belongs to the space (FC's deleteThread refuses it too). */
 	public function delete_thread( \WP_REST_Request $request ) {
 		if ( ! $this->chat_available() ) {
 			return $this->error( 400, __( 'Chat is not available on this site.', 'appza-core' ) );
@@ -766,8 +522,6 @@ class FluentCommunityChatController {
 			return $this->error( 403, __( 'You are not part of this conversation.', 'appza-core' ) );
 		}
 
-		// Cascades to messages, memberships and chat media — see
-		// Thread::deleteChatThread().
 		$thread->deleteChatThread();
 
 		return rest_ensure_response(
@@ -781,10 +535,6 @@ class FluentCommunityChatController {
 		);
 	}
 
-	/* ---------------------------------------------------------------
-	 * Presentation
-	 * ------------------------------------------------------------- */
-
 	/**
 	 * @return array<string, mixed>
 	 */
@@ -792,9 +542,6 @@ class FluentCommunityChatController {
 		$profile = \FluentCommunity\App\Services\Helper::getCurrentProfile();
 		$user    = \FluentCommunity\App\Models\User::find( $viewer );
 
-		// Everything the appbar and both 3-dot surfaces need is already
-		// composed by FC — reuse it rather than re-deriving the three
-		// thread shapes (community / group / DM) ourselves.
 		$transformed = \FluentMessaging\App\Services\ChatHelper::transformThread(
 			$thread,
 			$user,
@@ -817,9 +564,7 @@ class FluentCommunityChatController {
 			$space_permalink = method_exists( $thread->space, 'getPermalink' ) ? (string) $thread->space->getPermalink() : '';
 		}
 
-		// FC blanks last_activity itself once it is older than five
-		// minutes, so a non-empty value IS "active now". Recomputing the
-		// window here would only let the two disagree.
+		// FC blanks last_activity after five minutes, so non-empty means "active now".
 		$last_activity = isset( $info['last_activity'] ) ? (string) $info['last_activity'] : '';
 
 		$username = isset( $info['username'] ) ? (string) $info['username'] : '';
@@ -838,29 +583,17 @@ class FluentCommunityChatController {
 			'member_count'            => $this->member_count( (int) $thread->id ),
 			'is_active_now'           => $last_activity !== '',
 			'can_view_members'        => ! empty( $info['can_view_members'] ),
-			// transformUserThread() publishes no permission bag at all —
-			// FC only computes one for community and group threads — so
-			// a DM would report "cannot send" and the composer would be
-			// disabled on every one-to-one conversation. For a DM the
-			// rule is FC's own addMessage guard: an active membership row
-			// on a thread that is still active.
+			// FC publishes no permission bag for a DM; mirror its addMessage guard instead.
 			'can_send_message'        => 'user' === $type
 				? $this->can_send_dm( $thread, $viewer )
 				: ! empty( $info['can_send_message'] ),
 			'can_delete_any_messages' => ! empty( $info['can_delete_any_messages'] ),
-			// Only a DM can be blocked or deleted; only a community or
-			// group thread can be left. The two 3-dot surfaces branch on
-			// `type`, but the buttons inside them gate on these so a
-			// thread in an odd state cannot offer an action FC will
-			// refuse.
 			'can_leave'               => in_array( $type, array( 'community', 'group' ), true ),
 			'can_block'               => 'user' === $type,
 			'can_delete_conversation' => 'user' === $type,
 			'is_blocked'              => ! empty( $transformed->blocked_thread ),
 			'has_left'                => ! empty( $transformed->left_thread ),
 			'is_unavailable'          => ! empty( $transformed->is_unavailable ),
-			// Present so a caller that only asked for the thread still
-			// knows whether the composer has anything to talk to.
 			'message_count'           => (int) $thread->message_count,
 			'viewer_id'               => $viewer,
 			'viewer_name'             => $profile ? (string) $profile->display_name : '',
@@ -898,8 +631,6 @@ class FluentCommunityChatController {
 			'author_avatar'     => $profile ? (string) $profile->avatar : '',
 			'author_initials'   => $this->initials( $name ),
 			'author_username'   => $profile ? (string) $profile->username : '',
-			// Two flags, not one: the name sits above the first message
-			// of a run, the avatar beside the last.
 			'show_sender'       => $starts_run && ! $is_system,
 			'show_avatar'       => $ends_run && ! $is_system,
 			'message_rendered'  => $body,
@@ -911,20 +642,11 @@ class FluentCommunityChatController {
 			'reply_to_name'     => $reply_to > 0 ? $this->reply_author_name( $reply_to ) : '',
 			'reply_to_text'     => $reply_to > 0 ? $this->plain_text( $reply_text ) : '',
 			'is_system'         => $is_system,
-			// System messages are immutable in FC — deleteMessage
-			// refuses them outright, so never offer the affordance.
+			// FC's deleteMessage refuses system messages.
 			'can_delete'        => ! $is_system && ( $author_id === $viewer || $can_delete_any ),
 		);
 	}
 
-	/* ---------------------------------------------------------------
-	 * Resolution + access
-	 * ------------------------------------------------------------- */
-
-	/**
-	 * thread_id, else space_slug, else user_id. The space CHAT tab uses
-	 * the second so it can open a conversation knowing only a slug.
-	 */
 	private function resolve_thread( \WP_REST_Request $request, int $viewer ) {
 		$thread_id = (int) $request->get_param( 'thread_id' );
 		if ( $thread_id > 0 ) {
@@ -938,9 +660,7 @@ class FluentCommunityChatController {
 				return null;
 			}
 			$thread = \FluentMessaging\App\Services\ChatHelper::getChatThread( $space->id );
-			// A space whose Group Chat toggle is off keeps its thread row
-			// with status 'disabled'. Treat that as no chat at all rather
-			// than serving a conversation the portal has hidden.
+			// A space with Group Chat off keeps its thread with status 'disabled'.
 			if ( $thread && 'active' !== $thread->status ) {
 				return null;
 			}
@@ -955,14 +675,7 @@ class FluentCommunityChatController {
 		return null;
 	}
 
-	/**
-	 * Mirrors FC's addMessage guard for a one-to-one thread: the thread
-	 * is active and the viewer's own membership row is active.
-	 *
-	 * Blocking flips both — Thread.status to 'inactive' and the
-	 * blocker's ThreadUser to 'blocked' — so this returns false on
-	 * either side of a block without needing a separate check.
-	 */
+	/** FC's addMessage guard; a block flips both the thread and the blocker's membership status. */
 	private function can_send_dm( $thread, int $viewer ): bool {
 		if ( 'active' !== $thread->status ) {
 			return false;
@@ -995,8 +708,6 @@ class FluentCommunityChatController {
 	}
 
 	/**
-	 * One query for every author on the page.
-	 *
 	 * @param array<int, object> $rows
 	 * @return array<int, object>
 	 */
@@ -1019,14 +730,7 @@ class FluentCommunityChatController {
 		return $out;
 	}
 
-	/**
-	 * Display name of the message being replied to.
-	 *
-	 * FC stores only `reply_to` + `reply_text` on the meta — the name is
-	 * not in there, and the quote block in design 7 leads with it. One
-	 * lookup per distinct reply on the page; a static cache keeps a run
-	 * of replies to the same message down to one.
-	 */
+	/** FC's reply meta carries no author name. */
 	private function reply_author_name( int $message_id ): string {
 		static $cache = array();
 		if ( isset( $cache[ $message_id ] ) ) {
@@ -1046,17 +750,8 @@ class FluentCommunityChatController {
 		return $name;
 	}
 
-	/* ---------------------------------------------------------------
-	 * Text
-	 * ------------------------------------------------------------- */
-
 	/**
-	 * Split FC's stored message HTML into prose and image URLs.
-	 *
-	 * Stored shape is `<div class="chat_text">…</div>` optionally
-	 * followed by `<div class="chat_medias"><div class="chat_media"><img
-	 * src="…"></div>…</div>`. Both wrappers die in the proxy's wp_kses
-	 * pass, taking the images with them, so they are separated here.
+	 * The proxy's wp_kses strips FC's chat_text / chat_medias wrappers (and the images), so split them here.
 	 *
 	 * @return array{0: string, 1: array<int, string>}
 	 */
@@ -1071,9 +766,6 @@ class FluentCommunityChatController {
 			}
 		}
 
-		// Drop the media block wholesale, then unwrap the text one. A
-		// message that is only images leaves an empty body, which the
-		// bubble renders as image-only.
 		$body = preg_replace( '#<div class="chat_medias">.*?</div>\s*$#is', '', $html );
 		$body = is_string( $body ) ? $body : $html;
 		if ( preg_match( '#<div class="chat_text">(.*)</div>#is', $body, $inner ) ) {
@@ -1083,21 +775,11 @@ class FluentCommunityChatController {
 		return array( trim( (string) $body ), $images );
 	}
 
-	/**
-	 * The quoted line in design 7 is one line of plain text — any markup
-	 * in it would only fight the ellipsis.
-	 */
 	private function plain_text( string $html ): string {
 		return trim( wp_strip_all_tags( html_entity_decode( $html, ENT_QUOTES, 'UTF-8' ) ) );
 	}
 
-	/**
-	 * Compact age, with a weeks step.
-	 *
-	 * Not `created_at` and not the proxy's relative_time(), which jumps
-	 * from days to months and so can never produce the "2w" the designs
-	 * show.
-	 */
+	/** Not the proxy's relative_time(), which jumps from days to months and never yields "2w". */
 	private function time_label( string $stamp ): string {
 		if ( '' === $stamp ) {
 			return '';
@@ -1134,10 +816,6 @@ class FluentCommunityChatController {
 		return (int) floor( $diff / 31536000 ) . 'y';
 	}
 
-	/**
-	 * "Private for everyone" → PF, "MD Saiful" → MS. Matches the
-	 * fallback avatars throughout the designs.
-	 */
 	private function initials( string $name ): string {
 		$name = trim( wp_strip_all_tags( $name ) );
 		if ( '' === $name ) {
@@ -1160,24 +838,9 @@ class FluentCommunityChatController {
 		return function_exists( 'mb_strtoupper' ) ? mb_strtoupper( $letters ) : strtoupper( $letters );
 	}
 
-	/* ---------------------------------------------------------------
-	 * Loopback
-	 * ------------------------------------------------------------- */
-
 	/**
-	 * POST to a REST route over loopback HTTP, forwarding the caller's
-	 * credentials.
+	 * Loopback, not rest_do_request: FC reads its payload from php://input, so a nested dispatch would carry OUR body.
 	 *
-	 * Not `rest_do_request`: FluentCommunity's Request reads its JSON
-	 * payload from `php://input` and the superglobals rather than from
-	 * the WP_REST_Request it is handed, so a nested dispatch reaches it
-	 * carrying OUR request body instead of the one being sent (P78).
-	 *
-	 * Forwarding the Authorization header is enough because /fcom-login
-	 * issues a WordPress application password — so the Basic credential
-	 * the app holds is one core itself resolves on the way back in.
-	 *
-	 * @param string $path Full REST path after /wp-json, e.g. /fluent-community/v2/...
 	 * @return array{0:int, 1:array} [status, decoded body]; status 0 = never completed.
 	 */
 	private function loopback_post( string $path, array $payload, \WP_REST_Request $request ): array {
@@ -1207,12 +870,7 @@ class FluentCommunityChatController {
 		return array( $http, is_array( $body ) ? $body : array() );
 	}
 
-	/**
-	 * Best-effort human message out of an upstream body. Neither FC nor
-	 * WP settles on one error shape — `message` is sometimes a string and
-	 * sometimes a field-error bag — so reading only one of them turns a
-	 * validation failure into a blank toast.
-	 */
+	/** FC and WP disagree on error shape: `message` may be a string or a field-error bag. */
 	private function upstream_message( $body, string $fallback ): string {
 		if ( ! is_array( $body ) ) {
 			return $fallback;
@@ -1236,27 +894,12 @@ class FluentCommunityChatController {
 		return $fallback;
 	}
 
-	/* ---------------------------------------------------------------
-	 * Envelope
-	 * ------------------------------------------------------------- */
-
-	/**
-	 * FluentMessaging is an optional add-on. Every route degrades to an
-	 * empty list rather than fatalling on a site without it — the CHAT
-	 * tab is gated on the space payload's can_view_chat, which is false
-	 * there anyway, so this only catches a direct call.
-	 */
 	private function chat_available(): bool {
 		return class_exists( '\FluentMessaging\App\Models\Thread' )
 			&& class_exists( '\FluentMessaging\App\Services\ChatHelper' );
 	}
 
-	/**
-	 * A write's envelope — a message plus whatever it did, rather than a
-	 * list of rows.
-	 *
-	 * @param array<string, mixed> $data
-	 */
+	/** @param array<string, mixed> $data */
 	private function ok_message( string $message, array $data = array() ) {
 		return rest_ensure_response(
 			array(
