@@ -17,6 +17,7 @@ namespace AppzaCore\Plugin\Rest;
 use AppzaCore\Plugin\Repository\CatalogMetaRepository;
 use AppzaCore\Plugin\Repository\CatalogSnapshotRepository;
 use AppzaCore\Plugin\Services\CoreClient;
+use AppzaCore\Plugin\Services\CoreUrl;
 
 if ( ! defined( 'WPINC' ) ) {
 	die;
@@ -77,6 +78,7 @@ class SyncFromCoreController {
 		$this->meta->bump_catalog_snapshot_version();
 		$pulled_at = current_time( 'mysql', true );
 		update_option( 'appza_core_last_pulled_at', $pulled_at, false );
+		update_option( 'appza_core_last_pulled_from', CoreUrl::get(), false );
 
 		return rest_ensure_response(
 			array(

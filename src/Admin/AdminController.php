@@ -13,6 +13,7 @@ namespace AppzaCore\Plugin\Admin;
 use AppzaCore\Plugin\Repository\CatalogMetaRepository;
 use AppzaCore\Plugin\Repository\CatalogSnapshotRepository;
 use AppzaCore\Plugin\Services\CoreClient;
+use AppzaCore\Plugin\Services\CoreUrl;
 
 if ( ! defined( 'WPINC' ) ) {
 	die;
@@ -21,6 +22,8 @@ if ( ! defined( 'WPINC' ) ) {
 class AdminController {
 
 	const PULL_ACTION  = 'appza_core_pull_snapshot';
+	const URL_ACTION   = 'appza_core_save_core_url';
+	const TEST_ACTION  = 'appza_core_test_core_url';
 	const NOTICE_OPTION = 'appza_core_admin_notice';
 
 	protected $client;
@@ -67,6 +70,7 @@ class AdminController {
 
 		$this->meta->bump_catalog_snapshot_version();
 		update_option( 'appza_core_last_pulled_at', current_time( 'mysql', true ), false );
+		update_option( 'appza_core_last_pulled_from', CoreUrl::get(), false );
 
 		$this->set_notice( 'success', sprintf(
 			/* translators: 1: template slug, 2: version */
@@ -76,6 +80,46 @@ class AdminController {
 		) );
 
 		$this->redirect_back( $template_slug );
+	}
+
+	public function handle_save_url() {
+		if ( ! current_user_can( AdminMenu::CAPABILITY ) ) {
+			wp_die( __( 'You do not have permission to perform this action.', 'appza-core' ) );
+		}
+
+		check_admin_referer( self::URL_ACTION );
+
+		if ( 'constant' === CoreUrl::source() ) {
+			$this->set_notice( 'error', __( 'Core URL is set in wp-config.php and cannot be changed here.', 'appza-core' ) );
+			$this->redirect_to_sync();
+		}
+
+		$input = isset( $_POST['core_api_url'] ) ? sanitize_text_field( wp_unslash( $_POST['core_api_url'] ) ) : '';
+		$url   = CoreUrl::validate( $input );
+		if ( is_wp_error( $url ) ) {
+			$this->set_notice( 'error', $url->get_error_message() );
+			$this->redirect_to_sync();
+		}
+
+		update_option( CoreUrl::OPTION, $url, false );
+		$this->set_notice( 'success', sprintf( __( 'Core URL saved: %s', 'appza-core' ), $url ) );
+		$this->redirect_to_sync();
+	}
+
+	public function handle_test_url() {
+		if ( ! current_user_can( AdminMenu::CAPABILITY ) ) {
+			wp_die( __( 'You do not have permission to perform this action.', 'appza-core' ) );
+		}
+
+		check_admin_referer( self::TEST_ACTION );
+
+		$result = $this->client->fetch_source_integrations();
+		if ( is_wp_error( $result ) ) {
+			$this->set_notice( 'error', sprintf( __( 'Connection failed: %s', 'appza-core' ), $result->get_error_message() ) );
+		} else {
+			$this->set_notice( 'success', sprintf( __( 'Connected to Core (API %s).', 'appza-core' ), (string) ( $result['core_api_version'] ?? '?' ) ) );
+		}
+		$this->redirect_to_sync();
 	}
 
 	public function maybe_render_notice() {
@@ -107,6 +151,11 @@ class AdminController {
 			admin_url( 'admin.php' )
 		);
 		wp_safe_redirect( $url );
+		exit;
+	}
+
+	protected function redirect_to_sync() {
+		wp_safe_redirect( add_query_arg( 'page', AdminMenu::SLUG_SYNC, admin_url( 'admin.php' ) ) );
 		exit;
 	}
 }

@@ -191,6 +191,8 @@ class Appza_Core_Plugin {
 		$this->loader->add_action( 'admin_menu', $menu, 'register_menu' );
 		$this->loader->add_action( 'admin_notices', $controller, 'maybe_render_notice' );
 		$this->loader->add_action( 'admin_post_' . AdminController::PULL_ACTION, $controller, 'handle_pull' );
+		$this->loader->add_action( 'admin_post_' . AdminController::URL_ACTION, $controller, 'handle_save_url' );
+		$this->loader->add_action( 'admin_post_' . AdminController::TEST_ACTION, $controller, 'handle_test_url' );
 		$this->loader->add_action( 'admin_enqueue_scripts', $assets, 'enqueue' );
 		$this->loader->add_filter( 'script_loader_tag', $assets, 'add_module_type', 10, 2 );
 	}

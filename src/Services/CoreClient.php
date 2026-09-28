@@ -2,8 +2,8 @@
 /**
  * HTTP client to the APPZA Core SaaS catalog-export endpoint.
  *
- * Endpoint URL is built from the APPZA_CORE_API_URL constant (overridable per
- * install via wp-config.php). The Core-side endpoint is `GET /catalog/snapshot
+ * Base URL comes from CoreUrl (wp-config constant, then the Sync-page
+ * setting). The Core-side endpoint is `GET /catalog/snapshot
  * ?template=<slug>` and is expected to return:
  *
  *   {
@@ -28,7 +28,10 @@ if ( ! defined( 'WPINC' ) ) {
 class CoreClient {
 
 	public function fetch_snapshot( $template_slug ) {
-		$url = trailingslashit( APPZA_CORE_API_URL ) . 'catalog/snapshot?template=' . rawurlencode( $template_slug );
+		$url = $this->url( 'catalog/snapshot?template=' . rawurlencode( $template_slug ) );
+		if ( is_wp_error( $url ) ) {
+			return $url;
+		}
 
 		$data = $this->get_json( $url );
 		if ( is_wp_error( $data ) ) {
@@ -54,7 +57,10 @@ class CoreClient {
 	 * picked → return nothing"; pass null to omit the filter (all active).
 	 */
 	public function fetch_templates( $slugs = null ) {
-		$url = trailingslashit( APPZA_CORE_API_URL ) . 'catalog/templates';
+		$url = $this->url( 'catalog/templates' );
+		if ( is_wp_error( $url ) ) {
+			return $url;
+		}
 		if ( is_array( $slugs ) ) {
 			$url .= '?source_integrations=' . rawurlencode( implode( ',', $slugs ) );
 		}
@@ -80,7 +86,10 @@ class CoreClient {
 	 * or a WP_Error on transport/shape failure.
 	 */
 	public function fetch_source_integrations() {
-		$url = trailingslashit( APPZA_CORE_API_URL ) . 'catalog/source-integrations';
+		$url = $this->url( 'catalog/source-integrations' );
+		if ( is_wp_error( $url ) ) {
+			return $url;
+		}
 
 		$data = $this->get_json( $url );
 		if ( is_wp_error( $data ) ) {
@@ -97,10 +106,18 @@ class CoreClient {
 		return $data;
 	}
 
+	protected function url( $path ) {
+		$base = CoreUrl::get();
+		return is_wp_error( $base ) ? $base : $base . '/' . $path;
+	}
+
 	protected function get_json( $url ) {
 		$response = wp_remote_get( $url, array(
-			'timeout' => 15,
-			'headers' => array(
+			'timeout'             => 15,
+			'redirection'         => 0,
+			'sslverify'           => true,
+			'limit_response_size' => 10 * MB_IN_BYTES,
+			'headers'             => array(
 				'Accept'     => 'application/json',
 				'User-Agent' => 'APPZA-Core-Plugin/' . APPZA_CORE_VERSION,
 			),

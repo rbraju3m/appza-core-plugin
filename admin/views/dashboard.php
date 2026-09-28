@@ -10,7 +10,11 @@
  *   $pull_nonce         string — nonce for AdminController::PULL_ACTION
  *   $pull_action        string — admin-post action name
  *   $bootstrap_endpoint string — public REST URL clients hit on cold boot
- *   $core_api_url       string — APPZA_CORE_API_URL constant value
+ *   $core_api_url       string — Core API base URL (CoreUrl::raw)
+ *   $core_url_source    string — constant | option | none
+ *   $core_url_error     string — why the URL is unusable, or ''
+ *   $last_pulled_from   string — Core URL of the last successful pull
+ *   $url_action/$url_nonce, $test_action/$test_nonce — admin-post forms
  */
 
 if ( ! defined( 'WPINC' ) ) {
@@ -44,11 +48,35 @@ if ( ! defined( 'WPINC' ) ) {
 				<td><code><?php echo esc_html( $bootstrap_endpoint ); ?>?template=&lt;slug&gt;</code></td>
 			</tr>
 			<tr>
-				<th><?php esc_html_e( 'Core API base URL', 'appza-core' ); ?></th>
-				<td><code><?php echo esc_html( $core_api_url ); ?></code></td>
+				<th><?php esc_html_e( 'Last pulled from', 'appza-core' ); ?></th>
+				<td><?php echo $last_pulled_from ? '<code>' . esc_html( $last_pulled_from ) . '</code>' : '—'; ?></td>
 			</tr>
 		</tbody>
 	</table>
+
+	<h2 style="margin-top: 2em;"><?php esc_html_e( 'Core connection', 'appza-core' ); ?></h2>
+	<?php if ( $core_url_error ) : ?>
+		<div class="notice notice-error inline"><p><?php echo esc_html( $core_url_error ); ?></p></div>
+	<?php endif; ?>
+	<form method="post" action="<?php echo esc_url( $pull_action_url ); ?>">
+		<input type="hidden" name="action" value="<?php echo esc_attr( $url_action ); ?>" />
+		<input type="hidden" name="_wpnonce" value="<?php echo esc_attr( $url_nonce ); ?>" />
+		<p>
+			<label for="appza-core-api-url"><?php esc_html_e( 'Core API URL', 'appza-core' ); ?></label><br />
+			<input type="url" id="appza-core-api-url" name="core_api_url" value="<?php echo esc_attr( $core_api_url ); ?>" class="large-text code" placeholder="https://…/api/v1" <?php disabled( 'constant' === $core_url_source ); ?> />
+		</p>
+		<?php if ( 'constant' === $core_url_source ) : ?>
+			<p class="description"><?php esc_html_e( 'Set in wp-config.php (APPZA_CORE_API_URL).', 'appza-core' ); ?></p>
+		<?php else : ?>
+			<p class="description"><?php esc_html_e( 'https only; http is accepted for local hosts.', 'appza-core' ); ?></p>
+			<p><button type="submit" class="button"><?php esc_html_e( 'Save', 'appza-core' ); ?></button></p>
+		<?php endif; ?>
+	</form>
+	<form method="post" action="<?php echo esc_url( $pull_action_url ); ?>">
+		<input type="hidden" name="action" value="<?php echo esc_attr( $test_action ); ?>" />
+		<input type="hidden" name="_wpnonce" value="<?php echo esc_attr( $test_nonce ); ?>" />
+		<p><button type="submit" class="button" <?php disabled( 'none' === $core_url_source ); ?>><?php esc_html_e( 'Test connection', 'appza-core' ); ?></button></p>
+	</form>
 
 	<h2 style="margin-top: 2em;"><?php esc_html_e( 'Pull catalog from Core', 'appza-core' ); ?></h2>
 	<form method="post" action="<?php echo esc_url( $pull_action_url ); ?>">

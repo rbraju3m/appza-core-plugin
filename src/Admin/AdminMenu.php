@@ -18,6 +18,7 @@
 namespace AppzaCore\Plugin\Admin;
 
 use AppzaCore\Plugin\Repository\CatalogMetaRepository;
+use AppzaCore\Plugin\Services\CoreUrl;
 use AppzaCore\Plugin\Repository\CatalogSnapshotRepository;
 
 if ( ! defined( 'WPINC' ) ) {
@@ -92,7 +93,15 @@ class AdminMenu {
 		$pull_action     = AdminController::PULL_ACTION;
 
 		$bootstrap_endpoint = rest_url( APPZA_CORE_REST_NAMESPACE . '/bootstrap' );
-		$core_api_url       = APPZA_CORE_API_URL;
+		$core_api_url       = CoreUrl::raw();
+		$core_url_source    = CoreUrl::source();
+		$core_url           = CoreUrl::get();
+		$core_url_error     = is_wp_error( $core_url ) ? $core_url->get_error_message() : '';
+		$last_pulled_from   = (string) get_option( 'appza_core_last_pulled_from', '' );
+		$url_action         = AdminController::URL_ACTION;
+		$url_nonce          = wp_create_nonce( AdminController::URL_ACTION );
+		$test_action        = AdminController::TEST_ACTION;
+		$test_nonce         = wp_create_nonce( AdminController::TEST_ACTION );
 
 		require APPZA_CORE_PLUGIN_DIR . 'admin/views/dashboard.php';
 	}

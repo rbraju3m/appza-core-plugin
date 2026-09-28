@@ -38,10 +38,6 @@ define( 'APPZA_CORE_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'APPZA_CORE_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 define( 'APPZA_CORE_PLUGIN_BASENAME', plugin_basename( __FILE__ ) );
 
-if ( ! defined( 'APPZA_CORE_API_URL' ) ) {
-	define( 'APPZA_CORE_API_URL', 'http://localhost/appza-core-2.0/api/v1' );
-}
-
 if ( ! defined( 'APPZA_CORE_REST_NAMESPACE' ) ) {
 	define( 'APPZA_CORE_REST_NAMESPACE', 'appza/v1' );
 }
