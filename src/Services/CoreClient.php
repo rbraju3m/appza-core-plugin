@@ -86,6 +86,61 @@ class CoreClient {
 		return $data;
 	}
 
+	public function request_build( array $body ) {
+		return $this->build_call( 'POST', 'builds', $body );
+	}
+
+	public function build_status( $id ) {
+		return $this->build_call( 'GET', 'builds/' . rawurlencode( $id ) );
+	}
+
+	/** Core's own error message comes back as the WP_Error message, its status as data.status. */
+	protected function build_call( $method, $path, ?array $body = null ) {
+		$url = $this->url( $path );
+		if ( is_wp_error( $url ) ) {
+			return $url;
+		}
+		if ( '' === BuildToken::get() ) {
+			return new \WP_Error( 'appza_build_no_token', __( 'No build token. Add it on APPZA Core → Sync.', 'appza-core' ), array( 'status' => 400 ) );
+		}
+
+		$response = wp_remote_request( $url, array(
+			'method'      => $method,
+			'timeout'     => 30,
+			'redirection' => 0,
+			'sslverify'   => true,
+			'headers'     => array(
+				'Accept'        => 'application/json',
+				'Content-Type'  => 'application/json',
+				'Authorization' => 'Bearer ' . BuildToken::get(),
+				'User-Agent'    => 'APPZA-Core-Plugin/' . APPZA_CORE_VERSION,
+			),
+			'body'        => null === $body ? null : wp_json_encode( $body ),
+		) );
+		if ( is_wp_error( $response ) ) {
+			return $response;
+		}
+
+		$status = (int) wp_remote_retrieve_response_code( $response );
+		$data   = json_decode( wp_remote_retrieve_body( $response ), true );
+		if ( $status >= 200 && $status < 300 && is_array( $data ) ) {
+			return $data;
+		}
+
+		$message = is_array( $data ) && ! empty( $data['errors'] ) && is_array( $data['errors'] )
+			? implode( ' ', array_map( 'strval', array_merge( ...array_values( $data['errors'] ) ) ) )
+			: ( is_array( $data ) && isset( $data['error'] ) ? (string) $data['error'] : ( is_array( $data ) && isset( $data['message'] ) ? (string) $data['message'] : '' ) );
+		if ( 401 === $status ) {
+			$message = __( 'Core refused the build token. Check it on APPZA Core → Sync.', 'appza-core' );
+		}
+
+		return new \WP_Error(
+			'appza_build_core_error',
+			'' !== $message ? $message : sprintf( __( 'Core returned HTTP %d', 'appza-core' ), $status ),
+			array( 'status' => in_array( $status, array( 400, 409, 422, 429 ), true ) ? $status : 502 )
+		);
+	}
+
 	protected function url( $path ) {
 		$base = CoreUrl::get();
 		return is_wp_error( $base ) ? $base : $base . '/' . $path;

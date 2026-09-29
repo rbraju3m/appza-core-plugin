@@ -80,6 +80,9 @@ class AdminMenu {
 		$url_nonce          = wp_create_nonce( AdminController::URL_ACTION );
 		$test_action        = AdminController::TEST_ACTION;
 		$test_nonce         = wp_create_nonce( AdminController::TEST_ACTION );
+		$token_action       = AdminController::TOKEN_ACTION;
+		$token_nonce        = wp_create_nonce( AdminController::TOKEN_ACTION );
+		$build_token_source = \AppzaCore\Plugin\Services\BuildToken::source();
 
 		require APPZA_CORE_PLUGIN_DIR . 'admin/views/dashboard.php';
 	}

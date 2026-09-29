@@ -1,12 +1,12 @@
 <?php
 /**
- * POST /wp-json/appza/v1/build-requests
- *
- * Logs the request and returns the CLI command to run: PHP runs as www-data and cannot
- * reach the user-installed node/pnpm or write to the monorepo.
+ * POST /wp-json/appza/v1/build-requests       — ask Core for a QA APK of this site
+ * GET  /wp-json/appza/v1/build-requests/{id}  — its status, and the download link once done
  */
 
 namespace AppzaCore\Plugin\Rest;
+
+use AppzaCore\Plugin\Services\CoreClient;
 
 if ( ! defined( 'WPINC' ) ) {
 	die;
@@ -14,99 +14,83 @@ if ( ! defined( 'WPINC' ) ) {
 
 class BuildRequestsController {
 
-	const OPTION_KEY   = 'appza_build_requests_log';
-	const MAX_KEEP     = 50;
-	const MONOREPO_DIR = '/var/www/html/appza-mobile';
+	const OPTION_KEY = 'appza_build_requests_log';
+	const MAX_KEEP   = 50;
+
+	protected $client;
+
+	public function __construct( ?CoreClient $client = null ) {
+		$this->client = $client ?: new CoreClient();
+	}
 
 	public function permission_check() {
 		return current_user_can( 'manage_options' );
 	}
 
 	public function create( \WP_REST_Request $request ) {
-		$si_slug     = sanitize_title( (string) $request->get_param( 'source_integration_slug' ) );
-		$tpl_slug    = sanitize_title( (string) $request->get_param( 'template_slug' ) );
-		$mode        = (string) $request->get_param( 'base_url_mode' );
-		$custom_url  = $request->get_param( 'custom_base_url' );
+		$si_slug    = sanitize_title( (string) $request->get_param( 'source_integration_slug' ) );
+		$tpl_slug   = sanitize_title( (string) $request->get_param( 'template_slug' ) );
+		$mode       = (string) $request->get_param( 'base_url_mode' );
+		$custom_url = $request->get_param( 'custom_base_url' );
 
 		if ( '' === $si_slug ) {
-			return new \WP_Error(
-				'appza_build_bad_si',
-				__( 'source_integration_slug is required', 'appza-core' ),
-				array( 'status' => 400 )
-			);
+			return new \WP_Error( 'appza_build_bad_si', __( 'source_integration_slug is required', 'appza-core' ), array( 'status' => 400 ) );
 		}
 		if ( '' === $tpl_slug ) {
-			return new \WP_Error(
-				'appza_build_bad_template',
-				__( 'template_slug is required', 'appza-core' ),
-				array( 'status' => 400 )
-			);
+			return new \WP_Error( 'appza_build_bad_template', __( 'template_slug is required', 'appza-core' ), array( 'status' => 400 ) );
 		}
 		if ( ! in_array( $mode, array( 'current', 'custom' ), true ) ) {
-			return new \WP_Error(
-				'appza_build_bad_mode',
-				__( 'base_url_mode must be "current" or "custom"', 'appza-core' ),
-				array( 'status' => 400 )
-			);
+			return new \WP_Error( 'appza_build_bad_mode', __( 'base_url_mode must be "current" or "custom"', 'appza-core' ), array( 'status' => 400 ) );
 		}
 
-		if ( 'current' === $mode ) {
-			$resolved_url = rtrim( (string) get_site_url(), '/' );
-		} else {
-			$resolved_url = is_string( $custom_url ) ? trim( $custom_url ) : '';
-			if ( '' === $resolved_url || ! wp_http_validate_url( $resolved_url ) ) {
-				return new \WP_Error(
-					'appza_build_bad_custom_url',
-					__( 'custom_base_url must be a valid absolute URL', 'appza-core' ),
-					array( 'status' => 400 )
-				);
-			}
-			$resolved_url = esc_url_raw( $resolved_url );
+		$site = 'current' === $mode ? (string) get_site_url() : ( is_string( $custom_url ) ? trim( $custom_url ) : '' );
+		$site = untrailingslashit( $site );
+		if ( ! preg_match( '#^https://[A-Za-z0-9.-]+(:[0-9]+)?$#', $site ) ) {
+			return new \WP_Error(
+				'appza_build_bad_url',
+				'current' === $mode
+					? sprintf( __( 'This site is %s. A phone needs an https address it can reach; use a custom URL.', 'appza-core' ), $site )
+					: __( 'The custom URL must be an https address with no path, e.g. https://example.com', 'appza-core' ),
+				array( 'status' => 400 )
+			);
 		}
 
 		$active = get_option( ActiveSourceIntegrationsController::OPTION_KEY, array() );
 		if ( is_array( $active ) && ! in_array( $si_slug, $active, true ) ) {
-			return new \WP_Error(
-				'appza_build_si_inactive',
-				__( 'That Source Integration is not currently activated on this site.', 'appza-core' ),
-				array( 'status' => 409 )
-			);
+			return new \WP_Error( 'appza_build_si_inactive', __( 'That Source Integration is not currently activated on this site.', 'appza-core' ), array( 'status' => 409 ) );
 		}
 
-		$id           = time();
-		$requested_at = gmdate( 'c' );
-		$user_id      = get_current_user_id();
-
-		$row = array(
-			'id'                      => $id,
-			'source_integration_slug' => $si_slug,
+		$user   = wp_get_current_user();
+		$result = $this->client->request_build( array(
+			'site_url'                => $site,
 			'template_slug'           => $tpl_slug,
-			'base_url_mode'           => $mode,
-			'resolved_base_url'       => $resolved_url,
-			'requested_by'            => $user_id,
-			'requested_at'            => $requested_at,
-			'status'                  => 'pending_manual_execution',
-		);
-
-		$this->append_log( $row );
-
-		return rest_ensure_response( array(
-			'id'                      => $id,
 			'source_integration_slug' => $si_slug,
-			'template_slug'           => $tpl_slug,
-			'resolved_base_url'       => $resolved_url,
-			'requested_at'            => $requested_at,
-			'cli_command'             => $this->build_cli_command( $resolved_url, $tpl_slug ),
+			'requested_by'            => 'wp:' . $user->user_login . '@' . wp_parse_url( home_url(), PHP_URL_HOST ),
 		) );
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+
+		$this->append_log( array(
+			'id'            => (string) $result['id'],
+			'site_url'      => $site,
+			'template_slug' => $tpl_slug,
+			'requested_by'  => get_current_user_id(),
+			'requested_at'  => gmdate( 'c' ),
+		) );
+
+		return rest_ensure_response( $result );
 	}
 
-	protected function build_cli_command( $base_url, $template_slug ) {
-		return sprintf(
-			"cd %s && VITE_APPZA_SITE_URL=%s VITE_APPZA_TEMPLATE=%s pnpm --filter @appza/mobile build",
-			escapeshellarg( self::MONOREPO_DIR ),
-			escapeshellarg( $base_url ),
-			escapeshellarg( $template_slug )
-		);
+	public function show( \WP_REST_Request $request ) {
+		$id = (string) $request->get_param( 'id' );
+		if ( ! preg_match( '/^[0-9a-f-]{36}$/', $id ) ) {
+			return new \WP_Error( 'appza_build_bad_id', __( 'Unknown build.', 'appza-core' ), array( 'status' => 404 ) );
+		}
+
+		$result = $this->client->build_status( $id );
+
+		return is_wp_error( $result ) ? $result : rest_ensure_response( $result );
 	}
 
 	protected function append_log( array $row ) {

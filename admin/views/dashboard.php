@@ -62,6 +62,24 @@ if ( ! defined( 'WPINC' ) ) {
 		<p><button type="submit" class="button" <?php disabled( 'none' === $core_url_source ); ?>><?php esc_html_e( 'Test connection', 'appza-core' ); ?></button></p>
 	</form>
 
+	<h2 style="margin-top: 2em;"><?php esc_html_e( 'App builds', 'appza-core' ); ?></h2>
+	<form method="post" action="<?php echo esc_url( $pull_action_url ); ?>">
+		<input type="hidden" name="action" value="<?php echo esc_attr( $token_action ); ?>" />
+		<input type="hidden" name="_wpnonce" value="<?php echo esc_attr( $token_nonce ); ?>" />
+		<p>
+			<label for="appza-core-build-token"><?php esc_html_e( 'Build token', 'appza-core' ); ?></label><br />
+			<input type="password" id="appza-core-build-token" name="build_token" value="" class="regular-text code" autocomplete="off"
+				placeholder="<?php echo esc_attr( 'none' === $build_token_source ? __( 'Not set', 'appza-core' ) : __( 'Set (hidden). Type a new one to replace it.', 'appza-core' ) ); ?>"
+				<?php disabled( 'constant' === $build_token_source ); ?> />
+		</p>
+		<?php if ( 'constant' === $build_token_source ) : ?>
+			<p class="description"><?php esc_html_e( 'Set in wp-config.php (APPZA_CORE_BUILD_TOKEN).', 'appza-core' ); ?></p>
+		<?php else : ?>
+			<p class="description"><?php esc_html_e( 'From the Core admin. Build App sends it with each build request. Save it empty to remove it.', 'appza-core' ); ?></p>
+			<p><button type="submit" class="button"><?php esc_html_e( 'Save', 'appza-core' ); ?></button></p>
+		<?php endif; ?>
+	</form>
+
 	<h2 style="margin-top: 2em;"><?php esc_html_e( 'Pull catalog from Core', 'appza-core' ); ?></h2>
 	<form method="post" action="<?php echo esc_url( $pull_action_url ); ?>">
 		<input type="hidden" name="action" value="<?php echo esc_attr( $pull_action ); ?>" />

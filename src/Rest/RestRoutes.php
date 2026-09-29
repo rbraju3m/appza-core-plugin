@@ -138,8 +138,18 @@ class RestRoutes {
 					'source_integration_slug' => array( 'required' => true, 'type' => 'string' ),
 					'template_slug'           => array( 'required' => true, 'type' => 'string' ),
 					'base_url_mode'           => array( 'required' => true, 'type' => 'string' ),
-					'custom_base_url'         => array( 'type' => 'string' ),
+					'custom_base_url'         => array( 'type' => array( 'string', 'null' ) ),
 				),
+			)
+		);
+
+		register_rest_route(
+			APPZA_CORE_REST_NAMESPACE,
+			'/build-requests/(?P<id>[0-9a-f-]{36})',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => array( $build_requests, 'show' ),
+				'permission_callback' => array( $build_requests, 'permission_check' ),
 			)
 		);
 

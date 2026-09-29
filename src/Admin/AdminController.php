@@ -4,6 +4,7 @@ namespace AppzaCore\Plugin\Admin;
 use AppzaCore\Plugin\Repository\CatalogMetaRepository;
 use AppzaCore\Plugin\Repository\CatalogSnapshotRepository;
 use AppzaCore\Plugin\Services\CoreClient;
+use AppzaCore\Plugin\Services\BuildToken;
 use AppzaCore\Plugin\Services\CoreUrl;
 
 if ( ! defined( 'WPINC' ) ) {
@@ -15,6 +16,7 @@ class AdminController {
 	const PULL_ACTION  = 'appza_core_pull_snapshot';
 	const URL_ACTION   = 'appza_core_save_core_url';
 	const TEST_ACTION  = 'appza_core_test_core_url';
+	const TOKEN_ACTION = 'appza_core_save_build_token';
 	const NOTICE_OPTION = 'appza_core_admin_notice';
 
 	protected $client;
@@ -104,6 +106,29 @@ class AdminController {
 
 		update_option( CoreUrl::OPTION, $url, false );
 		$this->set_notice( 'success', sprintf( __( 'Core URL saved: %s', 'appza-core' ), $url ) );
+		$this->redirect_to_sync();
+	}
+
+	public function handle_save_build_token() {
+		if ( ! current_user_can( AdminMenu::CAPABILITY ) ) {
+			wp_die( __( 'You do not have permission to perform this action.', 'appza-core' ) );
+		}
+
+		check_admin_referer( self::TOKEN_ACTION );
+
+		if ( 'constant' === BuildToken::source() ) {
+			$this->set_notice( 'error', __( 'The build token is set in wp-config.php and cannot be changed here.', 'appza-core' ) );
+			$this->redirect_to_sync();
+		}
+
+		$token = isset( $_POST['build_token'] ) ? trim( sanitize_text_field( wp_unslash( $_POST['build_token'] ) ) ) : '';
+		if ( '' === $token ) {
+			delete_option( BuildToken::OPTION );
+			$this->set_notice( 'success', __( 'Build token removed.', 'appza-core' ) );
+		} else {
+			update_option( BuildToken::OPTION, $token, false );
+			$this->set_notice( 'success', __( 'Build token saved.', 'appza-core' ) );
+		}
 		$this->redirect_to_sync();
 	}
 

@@ -18,6 +18,8 @@ $options = array(
 	'appza_core_db_version',
 	'appza_core_last_pulled_at',
 	'appza_core_snapshot_etags',
+	'appza_core_build_token',
+	'appza_build_requests_log',
 );
 
 foreach ( $options as $option ) {
