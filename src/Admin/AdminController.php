@@ -40,7 +40,7 @@ class AdminController {
 			$this->redirect_back( '' );
 		}
 
-		$result = $this->client->fetch_snapshot( $template_slug );
+		$result = $this->client->fetch_snapshot( $template_slug, $this->snapshots->etag( $template_slug ) );
 
 		if ( is_wp_error( $result ) ) {
 			$this->set_notice( 'error', sprintf(
@@ -52,16 +52,26 @@ class AdminController {
 			$this->redirect_back( $template_slug );
 		}
 
+		update_option( 'appza_core_last_pulled_at', current_time( 'mysql', true ), false );
+		update_option( 'appza_core_last_pulled_from', CoreUrl::get(), false );
+
+		if ( ! empty( $result['not_modified'] ) ) {
+			$this->set_notice( 'success', sprintf(
+				/* translators: %s: template slug */
+				__( '%s is already up to date.', 'appza-core' ),
+				$template_slug
+			) );
+			$this->redirect_back( $template_slug );
+		}
+
 		$this->snapshots->upsert(
 			$template_slug,
 			$result['snapshot'],
 			(int) $result['catalog_snapshot_version'],
 			(string) $result['core_api_version']
 		);
-
+		$this->snapshots->remember_etag( $template_slug, $result['etag'] );
 		$this->meta->bump_catalog_snapshot_version();
-		update_option( 'appza_core_last_pulled_at', current_time( 'mysql', true ), false );
-		update_option( 'appza_core_last_pulled_from', CoreUrl::get(), false );
 
 		$this->set_notice( 'success', sprintf(
 			/* translators: 1: template slug, 2: version */

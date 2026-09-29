@@ -77,8 +77,34 @@ class CatalogSnapshotRepository {
 		return (int) $wpdb->insert_id;
 	}
 
+	const ETAGS_OPTION = 'appza_core_snapshot_etags';
+
+	/** Empty unless the row it describes is still here. */
+	public function etag( $template_slug ) {
+		global $wpdb;
+		$etags = get_option( self::ETAGS_OPTION, array() );
+		if ( empty( $etags[ $template_slug ] ) ) {
+			return '';
+		}
+		$table  = CatalogSnapshotSchema::table_name();
+		$exists = $wpdb->get_var( $wpdb->prepare( "SELECT 1 FROM {$table} WHERE template_slug = %s LIMIT 1", $template_slug ) );
+
+		return $exists ? (string) $etags[ $template_slug ] : '';
+	}
+
+	public function remember_etag( $template_slug, $etag ) {
+		$etags = get_option( self::ETAGS_OPTION, array() );
+		if ( '' === (string) $etag ) {
+			unset( $etags[ $template_slug ] );
+		} else {
+			$etags[ $template_slug ] = (string) $etag;
+		}
+		update_option( self::ETAGS_OPTION, $etags, false );
+	}
+
 	public function delete_by_template_slug( $template_slug ) {
 		global $wpdb;
+		$this->remember_etag( $template_slug, '' );
 		$table = CatalogSnapshotSchema::table_name();
 		return (int) $wpdb->delete( $table, array( 'template_slug' => $template_slug ), array( '%s' ) );
 	}

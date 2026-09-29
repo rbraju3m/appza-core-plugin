@@ -44,7 +44,7 @@ class SyncFromCoreController {
 			);
 		}
 
-		$result = $this->client->fetch_snapshot( $template_slug );
+		$result = $this->client->fetch_snapshot( $template_slug, $this->snapshots->etag( $template_slug ) );
 
 		if ( is_wp_error( $result ) ) {
 			return new \WP_Error(
@@ -59,14 +59,24 @@ class SyncFromCoreController {
 			);
 		}
 
-		$this->snapshots->upsert(
-			$template_slug,
-			$result['snapshot'],
-			(int) $result['catalog_snapshot_version'],
-			(string) $result['core_api_version']
-		);
+		$not_modified = ! empty( $result['not_modified'] );
+		if ( $not_modified ) {
+			$row    = $this->snapshots->find_by_template_slug( $template_slug );
+			$result = array(
+				'catalog_snapshot_version' => $row['catalog_snapshot_version'],
+				'core_api_version'         => $row['core_api_version'],
+			);
+		} else {
+			$this->snapshots->upsert(
+				$template_slug,
+				$result['snapshot'],
+				(int) $result['catalog_snapshot_version'],
+				(string) $result['core_api_version']
+			);
+			$this->snapshots->remember_etag( $template_slug, $result['etag'] );
+			$this->meta->bump_catalog_snapshot_version();
+		}
 
-		$this->meta->bump_catalog_snapshot_version();
 		$pulled_at = current_time( 'mysql', true );
 		update_option( 'appza_core_last_pulled_at', $pulled_at, false );
 		update_option( 'appza_core_last_pulled_from', CoreUrl::get(), false );
@@ -77,6 +87,7 @@ class SyncFromCoreController {
 				'catalog_snapshot_version' => (int) $result['catalog_snapshot_version'],
 				'core_api_version'         => (string) $result['core_api_version'],
 				'pulled_at'                => $pulled_at,
+				'not_modified'             => $not_modified,
 			)
 		);
 	}

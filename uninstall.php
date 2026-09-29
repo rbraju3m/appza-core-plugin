@@ -17,6 +17,7 @@ foreach ( $tables as $table ) {
 $options = array(
 	'appza_core_db_version',
 	'appza_core_last_pulled_at',
+	'appza_core_snapshot_etags',
 );
 
 foreach ( $options as $option ) {
