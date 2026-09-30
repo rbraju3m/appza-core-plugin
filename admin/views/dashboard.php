@@ -6,7 +6,7 @@ if ( ! defined( 'WPINC' ) ) {
 }
 ?>
 <div class="wrap appza-core-dashboard">
-	<h1><?php esc_html_e( 'APPZA Core', 'appza-core' ); ?></h1>
+	<h1><img src="<?php echo esc_url( APPZA_CORE_PLUGIN_URL . 'assets/admin/images/appza-logo.png' ); ?>" alt="<?php esc_attr_e( 'APPZA Core', 'appza-core' ); ?>" style="height: 36px; width: auto; vertical-align: middle;" /></h1>
 
 	<h2><?php esc_html_e( 'Version registry', 'appza-core' ); ?></h2>
 	<table class="widefat striped" style="max-width: 720px;">

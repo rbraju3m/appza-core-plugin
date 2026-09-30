@@ -94,6 +94,10 @@ class CoreClient {
 		return $this->build_call( 'GET', 'builds/' . rawurlencode( $id ) );
 	}
 
+	public function build_list( array $ids ) {
+		return $this->build_call( 'GET', 'builds?ids=' . rawurlencode( implode( ',', $ids ) ) );
+	}
+
 	/** Core's own error message comes back as the WP_Error message, its status as data.status. */
 	protected function build_call( $method, $path, ?array $body = null ) {
 		$url = $this->url( $path );
