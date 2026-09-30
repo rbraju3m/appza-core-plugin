@@ -4,16 +4,23 @@ if ( ! defined( 'WPINC' ) ) {
 }
 ?>
 <style>
-	/* Full-bleed within the WP admin frame. The admin content column
-	   has #wpcontent padding; counter it so the app sits flush against
-	   the admin menu / top bar. */
-	#wpcontent { padding-left: 0 !important; }
+	/* Pinned to the window: the admin menu can be taller than the screen and scroll the page. */
 	.appza-core-app-host {
-		margin: -10px 0 -65px -1px; /* top:remove notice gap; bottom:cover the footer; left:flush */
-		height: calc(100vh - 32px);
+		position: fixed;
+		top: 32px;
+		left: 160px;
+		right: 0;
+		bottom: 0;
+		z-index: 1;
+		background: #fff;
+	}
+	.folded .appza-core-app-host { left: 36px; }
+	@media (max-width: 960px) {
+		.auto-fold .appza-core-app-host { left: 36px; }
 	}
 	@media (max-width: 782px) {
-		.appza-core-app-host { height: calc(100vh - 46px); }
+		.appza-core-app-host,
+		.auto-fold .appza-core-app-host { top: 46px; left: 0; }
 	}
 </style>
 <div class="appza-core-app-host">
