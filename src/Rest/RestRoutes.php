@@ -18,6 +18,7 @@ class RestRoutes {
 		$templates_list = new TemplatesController();
 		$build_requests = new BuildRequestsController();
 		$space_config   = new SpaceConfigController();
+		$screen_layout  = new ScreenLayoutController();
 
 		register_rest_route(
 			APPZA_CORE_REST_NAMESPACE,
@@ -108,6 +109,39 @@ class RestRoutes {
 				'callback'            => array( $customizations, 'delete' ),
 				'permission_callback' => array( $customizations, 'permission_check' ),
 			)
+		);
+
+		$layout_methods = array(
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => array( $screen_layout, 'show' ),
+				'permission_callback' => array( $screen_layout, 'permission_check' ),
+			),
+			array(
+				'methods'             => \WP_REST_Server::EDITABLE,
+				'callback'            => array( $screen_layout, 'save' ),
+				'permission_callback' => array( $screen_layout, 'permission_check' ),
+				'args'                => array(
+					'items'        => array( 'required' => true ),
+					// Not `required`: WordPress reads a JSON null as missing, and null means "no row yet".
+					'base_version' => array(),
+				),
+			),
+			array(
+				'methods'             => \WP_REST_Server::DELETABLE,
+				'callback'            => array( $screen_layout, 'reset' ),
+				'permission_callback' => array( $screen_layout, 'permission_check' ),
+			),
+		);
+		register_rest_route(
+			APPZA_CORE_REST_NAMESPACE,
+			'/screen-layout/(?P<template>[a-z0-9-]+)/(?P<screen>[a-z0-9-]+)/(?P<part>[a-z-]+)',
+			$layout_methods
+		);
+		register_rest_route(
+			APPZA_CORE_REST_NAMESPACE,
+			'/chrome-layout/(?P<template>[a-z0-9-]+)/(?P<part>[a-z-]+)',
+			$layout_methods
 		);
 
 		register_rest_route(

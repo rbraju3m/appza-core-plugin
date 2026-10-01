@@ -7,7 +7,7 @@ FAILS=0
 SKIPS=0
 . "$HERE/lib.sh"
 
-AREAS=${*:-a2 a3 a4 a5 a7 a8 a6}
+AREAS=${*:-a2 a3 a4 a5 a7 a8 a6 builder}
 
 cleanup() {
 	echo

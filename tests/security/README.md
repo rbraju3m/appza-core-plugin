@@ -1,6 +1,7 @@
 # Security regression suite (go-live A14)
 
 Keeps S1–S8 fixed: one check per bullet in go-live A2–A8, over HTTP.
+The `builder` area covers the D110 layout endpoints.
 FluentCommunity validates only over HTTP, so in-process tests would pass
 writes the API refuses.
 
@@ -18,6 +19,10 @@ repo, no unenrolled test course).
   block of the student are kept in option `appza_a14_ledger`.
 - A6 sets the student's FC status to `blocked`, then back (saved in
   option `appza_a14_student_status`).
+
+- `builder` (D110) saves layouts on `fluent-community-dark` only, and
+  resets them at the end. It skips itself if that template already has a
+  saved layout.
 
 An exit trap restores the student, deletes the rows by marker and the
 ledger, and revokes the passwords, pass or fail. If a run is killed hard,

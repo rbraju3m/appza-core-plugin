@@ -3,6 +3,7 @@ namespace AppzaCore\Plugin\Rest;
 
 use AppzaCore\Plugin\Repository\CustomizationRepository;
 use AppzaCore\Plugin\Schema\CustomizationSchema;
+use AppzaCore\Plugin\Services\ScreenLayout;
 
 if ( ! defined( 'WPINC' ) ) {
 	die;
@@ -61,6 +62,17 @@ class CustomizationsController {
 			return new \WP_Error(
 				'appza_customizations_missing_column',
 				__( 'target_column is required', 'appza-core' ),
+				array( 'status' => 400 )
+			);
+		}
+
+		// Builder layouts go through /screen-layout and /chrome-layout, which validate them.
+		if ( in_array( $scope, array( 'template', 'template_screen' ), true )
+			&& in_array( $target_column, ScreenLayout::LAYOUT_COLUMNS, true )
+		) {
+			return new \WP_Error(
+				'appza_customizations_layout_column',
+				__( 'Save layouts through the screen-layout endpoint.', 'appza-core' ),
 				array( 'status' => 400 )
 			);
 		}

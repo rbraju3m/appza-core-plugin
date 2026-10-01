@@ -2,6 +2,7 @@
 namespace AppzaCore\Plugin\Repository;
 
 use AppzaCore\Plugin\Schema\CustomizationSchema;
+use AppzaCore\Plugin\Services\ScreenLayout;
 
 if ( ! defined( 'WPINC' ) ) {
 	die;
@@ -137,10 +138,83 @@ class CustomizationRepository {
 		return $deleted;
 	}
 
+	/**
+	 * Saves a builder layout only if the row is still at base_version (null: no row yet).
+	 *
+	 * @return array{ok: bool, version: ?int}
+	 */
+	public function save_layout( $scope, $target_slug, $template_slug, $column, $value, $base_version ) {
+		global $wpdb;
+		$table    = CustomizationSchema::table_name();
+		$json     = wp_json_encode( $value );
+		$user_id  = get_current_user_id() ?: null;
+		$existing = $this->find( $scope, $target_slug, $template_slug, $column );
+
+		if ( $existing ) {
+			if ( null === $base_version || (int) $existing['version'] !== (int) $base_version ) {
+				return array( 'ok' => false, 'version' => (int) $existing['version'] );
+			}
+			$next    = (int) $existing['version'] + 1;
+			$changed = $wpdb->query(
+				$wpdb->prepare(
+					"UPDATE {$table} SET override_value = %s, version = %d, updated_by = %d WHERE id = %d AND version = %d",
+					$json,
+					$next,
+					(int) $user_id,
+					(int) $existing['id'],
+					(int) $base_version
+				)
+			);
+			if ( 1 !== (int) $changed ) {
+				$now = $this->find( $scope, $target_slug, $template_slug, $column );
+				return array( 'ok' => false, 'version' => $now ? (int) $now['version'] : null );
+			}
+			$this->meta->bump_customizations_version();
+			return array( 'ok' => true, 'version' => $next );
+		}
+
+		if ( null !== $base_version ) {
+			return array( 'ok' => false, 'version' => null );
+		}
+		// The unique key catches a racing insert: the composite is never NULL here.
+		$inserted = $wpdb->insert(
+			$table,
+			array(
+				'scope'                 => $scope,
+				'target_slug'           => $target_slug,
+				'target_slug_composite' => $template_slug,
+				'target_column'         => $column,
+				'override_value'        => $json,
+				'version'               => 1,
+				'created_by'            => $user_id,
+				'updated_by'            => $user_id,
+			),
+			array( '%s', '%s', '%s', '%s', '%s', '%d', '%d', '%d' )
+		);
+		if ( ! $inserted ) {
+			$now = $this->find( $scope, $target_slug, $template_slug, $column );
+			return array( 'ok' => false, 'version' => $now ? (int) $now['version'] : null );
+		}
+		$this->meta->bump_customizations_version();
+		return array( 'ok' => true, 'version' => 1 );
+	}
+
+	public function delete_layout( $scope, $target_slug, $template_slug, $column ) {
+		$row = $this->find( $scope, $target_slug, $template_slug, $column );
+		return $row ? $this->delete( (int) $row['id'] ) : 0;
+	}
+
 	protected function target_key_for( array $row ) {
 		$scope = (string) $row['scope'];
 		if ( 'global' === $scope ) {
 			return '';
+		}
+		// A screen's builder layout is per template (D110); screen_tokens stay keyed by screen.
+		if ( 'template_screen' === $scope
+			&& in_array( (string) $row['target_column'], ScreenLayout::LAYOUT_COLUMNS, true )
+			&& ! empty( $row['target_slug_composite'] )
+		) {
+			return $row['target_slug_composite'] . ':' . $row['target_slug'];
 		}
 		if ( 'template_screen_placement' === $scope || 'appzet_primitive' === $scope ) {
 			return (string) ( $row['target_slug_composite'] ?? '' );
