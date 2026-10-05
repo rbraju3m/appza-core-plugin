@@ -164,6 +164,8 @@ class CoreClient {
 			'headers'             => array_merge( array(
 				'Accept'     => 'application/json',
 				'User-Agent' => 'APPZA-Core-Plugin/' . APPZA_CORE_VERSION,
+				// Lets Core show which sites have synced its latest catalog.
+				'X-Appza-Site' => home_url(),
 			), $headers ),
 		) );
 
