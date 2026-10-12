@@ -1,6 +1,6 @@
 {
   "../../node_modules/.pnpm/@ionic+core@8.8.12/node_modules/@ionic/core/components/p-C1aScSTo.js": {
-    "file": "p-C1aScSTo-Bi2gteC7.js",
+    "file": "p-C1aScSTo-CPms_1f_.js",
     "name": "p-C1aScSTo",
     "src": "../../node_modules/.pnpm/@ionic+core@8.8.12/node_modules/@ionic/core/components/p-C1aScSTo.js",
     "isDynamicEntry": true,
@@ -9,7 +9,7 @@
     ]
   },
   "../../node_modules/.pnpm/@ionic+core@8.8.12/node_modules/@ionic/core/components/p-C4t5ymfq.js": {
-    "file": "p-C4t5ymfq-DrDbUPv3.js",
+    "file": "p-C4t5ymfq-BGaHBWbx.js",
     "name": "p-C4t5ymfq",
     "src": "../../node_modules/.pnpm/@ionic+core@8.8.12/node_modules/@ionic/core/components/p-C4t5ymfq.js",
     "isDynamicEntry": true,
@@ -18,7 +18,7 @@
     ]
   },
   "../../node_modules/.pnpm/@ionic+core@8.8.12/node_modules/@ionic/core/components/p-D5Ubpm7D.js": {
-    "file": "p-D5Ubpm7D-DZC7LUNn.js",
+    "file": "p-D5Ubpm7D-BPwXnbOA.js",
     "name": "p-D5Ubpm7D",
     "src": "../../node_modules/.pnpm/@ionic+core@8.8.12/node_modules/@ionic/core/components/p-D5Ubpm7D.js",
     "isDynamicEntry": true,
@@ -27,7 +27,7 @@
     ]
   },
   "../../node_modules/.pnpm/@ionic+core@8.8.12/node_modules/@ionic/core/components/p-D6Ynv7Xh.js": {
-    "file": "p-D6Ynv7Xh-BiDt7CaJ.js",
+    "file": "p-D6Ynv7Xh-BVGcGV-D.js",
     "name": "p-D6Ynv7Xh",
     "src": "../../node_modules/.pnpm/@ionic+core@8.8.12/node_modules/@ionic/core/components/p-D6Ynv7Xh.js",
     "isDynamicEntry": true,
@@ -36,7 +36,7 @@
     ]
   },
   "../../node_modules/.pnpm/@ionic+core@8.8.12/node_modules/@ionic/core/components/p-D7bSXQD3.js": {
-    "file": "p-D7bSXQD3-CeHGJIG1.js",
+    "file": "p-D7bSXQD3-mtSSQF2i.js",
     "name": "p-D7bSXQD3",
     "src": "../../node_modules/.pnpm/@ionic+core@8.8.12/node_modules/@ionic/core/components/p-D7bSXQD3.js",
     "isDynamicEntry": true,
@@ -45,7 +45,7 @@
     ]
   },
   "../../node_modules/.pnpm/@ionic+core@8.8.12/node_modules/@ionic/core/components/p-DIE4pXMl.js": {
-    "file": "p-DIE4pXMl-D0uyv_Nn.js",
+    "file": "p-DIE4pXMl-BvAjyE2w.js",
     "name": "p-DIE4pXMl",
     "src": "../../node_modules/.pnpm/@ionic+core@8.8.12/node_modules/@ionic/core/components/p-DIE4pXMl.js",
     "isDynamicEntry": true,
@@ -54,7 +54,7 @@
     ]
   },
   "../../node_modules/.pnpm/@ionic+core@8.8.12/node_modules/@ionic/core/components/p-Sh0ICmPV.js": {
-    "file": "p-Sh0ICmPV-DjlaKCps.js",
+    "file": "p-Sh0ICmPV-ClGIJIiF.js",
     "name": "p-Sh0ICmPV",
     "src": "../../node_modules/.pnpm/@ionic+core@8.8.12/node_modules/@ionic/core/components/p-Sh0ICmPV.js",
     "isDynamicEntry": true,
@@ -63,7 +63,7 @@
     ]
   },
   "index.html": {
-    "file": "index-DdsYACHW.js",
+    "file": "index-CC7pBfiq.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
@@ -78,7 +78,7 @@
       "../../node_modules/.pnpm/@ionic+core@8.8.12/node_modules/@ionic/core/components/p-Sh0ICmPV.js"
     ],
     "css": [
-      "index-Dk9h8u69.css"
+      "index-BsVsWRtl.css"
     ]
   }
 }
