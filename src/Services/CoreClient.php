@@ -40,6 +40,35 @@ class CoreClient {
 		return $data;
 	}
 
+	/** The simulator's Design tab index. Returns array( 'not_modified' => true ) when $etag still matches. */
+	public function fetch_design_index( $template_slug, $etag = '' ) {
+		$url = $this->url( 'catalog/design-index?template=' . rawurlencode( $template_slug ) );
+		if ( is_wp_error( $url ) ) {
+			return $url;
+		}
+
+		$response = $this->get( $url, '' !== $etag ? array( 'If-None-Match' => $etag ) : array() );
+		if ( is_wp_error( $response ) ) {
+			return $response;
+		}
+		if ( 304 === (int) wp_remote_retrieve_response_code( $response ) ) {
+			return array( 'not_modified' => true );
+		}
+
+		$data = $this->decode( $response );
+		if ( is_wp_error( $data ) ) {
+			return $data;
+		}
+		if ( ! isset( $data['entries'], $data['appzets'] ) || ! is_array( $data['entries'] ) || ! is_array( $data['appzets'] ) ) {
+			return new \WP_Error( 'appza_core_shape_error', __( 'Core design index has no entries.', 'appza-core' ) );
+		}
+
+		return array(
+			'index' => $data,
+			'etag'  => (string) wp_remote_retrieve_header( $response, 'etag' ),
+		);
+	}
+
 	/** $slugs: null = no filter; an empty array = no integrations picked, returns nothing. */
 	public function fetch_templates( $slugs = null ) {
 		$url = $this->url( 'catalog/templates' );

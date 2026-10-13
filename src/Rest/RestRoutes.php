@@ -19,6 +19,7 @@ class RestRoutes {
 		$build_requests = new BuildRequestsController();
 		$space_config   = new SpaceConfigController();
 		$screen_layout  = new ScreenLayoutController();
+		$design_index   = new DesignIndexController();
 
 		register_rest_route(
 			APPZA_CORE_REST_NAMESPACE,
@@ -55,6 +56,23 @@ class RestRoutes {
 					'permission_callback' => array( $active_sources, 'permission_check' ),
 					'args'                => array(
 						'slugs' => array( 'required' => true ),
+					),
+				),
+			)
+		);
+
+		register_rest_route(
+			APPZA_CORE_REST_NAMESPACE,
+			'/design-index',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => array( $design_index, 'handle' ),
+				'permission_callback' => array( $design_index, 'permission_check' ),
+				'args'                => array(
+					'template' => array(
+						'required'          => true,
+						'type'              => 'string',
+						'sanitize_callback' => 'sanitize_title',
 					),
 				),
 			)
