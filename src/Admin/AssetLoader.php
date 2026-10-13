@@ -49,6 +49,7 @@ class AssetLoader {
 						// Full URLs: the app appends params via the URL API, so pretty and ?rest_route= forms both work.
 						'bootstrap'                => esc_url_raw( $this->endpoint_url( 'bootstrap' ) ),
 						'customizations'           => esc_url_raw( $this->endpoint_url( 'customizations' ) ),
+						'designIndex'              => esc_url_raw( $this->endpoint_url( 'design-index' ) ),
 						'syncFromCore'             => esc_url_raw( $this->endpoint_url( 'sync-from-core' ) ),
 						'sourceIntegrations'       => esc_url_raw( $this->endpoint_url( 'source-integrations' ) ),
 						'activeSourceIntegrations' => esc_url_raw( $this->endpoint_url( 'active-source-integrations' ) ),
