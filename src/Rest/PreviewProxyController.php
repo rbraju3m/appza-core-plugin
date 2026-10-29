@@ -1382,10 +1382,13 @@ class PreviewProxyController {
 			}
 			return $out;
 		}
-		// Single uploaded image; oembed thumbnails are excluded.
+		// Single uploaded image, or a GIPHY gif (FC stores those as type image,
+		// provider giphy — no media row); oembed thumbnails are excluded.
 		if ( isset( $meta['media_preview'] ) && is_array( $meta['media_preview'] ) ) {
-			$mp = $meta['media_preview'];
-			if ( ( isset( $mp['type'] ) && 'meta_data' === $mp['type'] )
+			$mp       = $meta['media_preview'];
+			$type     = isset( $mp['type'] ) ? (string) $mp['type'] : '';
+			$is_giphy = 'image' === $type && isset( $mp['provider'] ) && 'giphy' === $mp['provider'];
+			if ( ( 'meta_data' === $type || $is_giphy )
 				&& ! empty( $mp['image'] ) && is_string( $mp['image'] ) ) {
 				return array( array(
 					'url'    => (string) $mp['image'],
