@@ -79,7 +79,15 @@ class AdminMenu {
 		$meta      = ( new CatalogMetaRepository() )->get();
 		$snapshots = ( new CatalogSnapshotRepository() )->all();
 
-		$default_template = isset( $_GET['template'] ) ? sanitize_title( wp_unslash( $_GET['template'] ) ) : 'fluent-community-default';
+		// P2: the page leads with the site's own template, by name.
+		$site_template      = \AppzaCore\Plugin\Rest\SiteTemplateController::resolve();
+		$site_template_row  = ( new CatalogSnapshotRepository() )->find_by_template_slug( $site_template );
+		$site_template_name = is_array( $site_template_row['snapshot_blob']['template'] ?? null ) && ! empty( $site_template_row['snapshot_blob']['template']['name'] )
+			? (string) $site_template_row['snapshot_blob']['template']['name']
+			: $site_template;
+		$site_template_at   = $site_template_row ? (string) ( $site_template_row['updated_at'] ?? '' ) : '';
+
+		$default_template = isset( $_GET['template'] ) ? sanitize_title( wp_unslash( $_GET['template'] ) ) : $site_template;
 
 		$pull_action_url = admin_url( 'admin-post.php' );
 		$pull_nonce      = wp_create_nonce( AdminController::PULL_ACTION );

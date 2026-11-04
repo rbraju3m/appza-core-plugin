@@ -27,11 +27,14 @@ $options = array(
 	'appza_core_snapshot_etags',
 	'appza_core_build_token',
 	'appza_build_requests_log',
+	'appza_core_site_template',
 );
 
 foreach ( $options as $option ) {
 	delete_option( $option );
 }
+
+delete_metadata( 'user', 0, 'appza_core_tour_seen', '', true );
 
 $wpdb->query(
 	"DELETE FROM {$wpdb->options}

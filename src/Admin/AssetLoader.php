@@ -34,11 +34,13 @@ class AssetLoader {
 		$base_url = APPZA_CORE_PLUGIN_URL . 'assets/admin/';
 
 		if ( ! empty( $entry['file'] ) ) {
+			// No ?ver: Ionic's lazy chunks import this file by its bare name, and a second URL makes the browser run the
+			// whole builder twice (a second mount that wipes the first-run tour). The hashed filename busts the cache.
 			wp_enqueue_script(
 				self::HANDLE,
 				$base_url . $entry['file'],
 				array(),
-				APPZA_CORE_VERSION,
+				null,
 				true
 			);
 			wp_localize_script(
@@ -54,10 +56,17 @@ class AssetLoader {
 						'sourceIntegrations'       => esc_url_raw( $this->endpoint_url( 'source-integrations' ) ),
 						'activeSourceIntegrations' => esc_url_raw( $this->endpoint_url( 'active-source-integrations' ) ),
 						'templates'                => esc_url_raw( $this->endpoint_url( 'templates' ) ),
-							'buildRequests'            => esc_url_raw( $this->endpoint_url( 'build-requests' ) ),
+						'buildRequests'            => esc_url_raw( $this->endpoint_url( 'build-requests' ) ),
+						'siteTemplate'             => esc_url_raw( $this->endpoint_url( 'site-template' ) ),
+						'tourSeen'                 => esc_url_raw( $this->endpoint_url( 'onboarding/tour-seen' ) ),
+						'coreConnection'           => esc_url_raw( $this->endpoint_url( 'core-connection' ) ),
+						'syncPage'                 => esc_url_raw( admin_url( 'admin.php?page=' . AdminMenu::SLUG_SYNC ) ),
 					),
 					'restNonce'       => wp_create_nonce( 'wp_rest' ),
-					'defaultTemplate' => 'fluent-community-default',
+					// The site's remembered template; a site that never saved one opens on its newest synced template.
+					'defaultTemplate' => \AppzaCore\Plugin\Rest\SiteTemplateController::resolve(),
+					'templateSaved'   => '' !== \AppzaCore\Plugin\Rest\SiteTemplateController::saved(),
+					'tourSeen'        => \AppzaCore\Plugin\Rest\SiteTemplateController::tour_seen(),
 					'assetsBase'      => esc_url_raw( $base_url ),
 					'siteUrl'         => esc_url_raw( get_site_url() ),
 				)

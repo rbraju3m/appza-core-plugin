@@ -1,5 +1,5 @@
 <?php
-// A14 fixtures, run through wp-cli eval-file only. A14_ACTION=mint|revoke|create|state|a4-reset|block|restore|cleanup
+// A14 fixtures, run through wp-cli eval-file only. A14_ACTION=mint|revoke|create|state|a4-reset|block|restore|cleanup|p2_forget
 // Rows carry "[A14-PROBE]" / "a14-probe-"; rows with no text column are kept in a ledger option.
 
 defined( 'WP_CLI' ) || exit;
@@ -133,6 +133,13 @@ if ( 'block' === $action || 'restore' === $action ) {
 	if ( 'restore' === $action ) {
 		delete_option( A14_STATUS );
 	}
+}
+
+// P2: a site that had no remembered template goes back to having none.
+if ( 'p2_forget' === $action ) {
+	delete_option( 'appza_core_site_template' );
+	echo wp_json_encode( array( 'p2_forget' => true ) ) . "\n";
+	return;
 }
 
 if ( 'cleanup' === $action ) {

@@ -20,6 +20,8 @@ repo, no unenrolled test course).
 - A6 sets the student's FC status to `blocked`, then back (saved in
   option `appza_a14_student_status`).
 
+- `p2` (Friendly v2) sets the remembered template to `fluent-community-default` and puts back what was there
+  (deletes the option if the site had none).
 - `builder` (D110) saves layouts on `fluent-community-dark` only, and
   resets them at the end. It skips itself if that template already has a
   saved layout.

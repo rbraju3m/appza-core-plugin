@@ -20,6 +20,8 @@ class RestRoutes {
 		$space_config   = new SpaceConfigController();
 		$screen_layout  = new ScreenLayoutController();
 		$design_index   = new DesignIndexController();
+		$site_template  = new SiteTemplateController();
+		$connection     = new CoreConnectionController();
 
 		register_rest_route(
 			APPZA_CORE_REST_NAMESPACE,
@@ -58,6 +60,56 @@ class RestRoutes {
 						'slugs' => array( 'required' => true ),
 					),
 				),
+			)
+		);
+
+		register_rest_route(
+			APPZA_CORE_REST_NAMESPACE,
+			'/site-template',
+			array(
+				array(
+					'methods'             => \WP_REST_Server::READABLE,
+					'callback'            => array( $site_template, 'get' ),
+					'permission_callback' => array( $site_template, 'permission_check' ),
+				),
+				array(
+					'methods'             => \WP_REST_Server::CREATABLE,
+					'callback'            => array( $site_template, 'put' ),
+					'permission_callback' => array( $site_template, 'permission_check' ),
+					'args'                => array(
+						'template' => array( 'required' => true, 'type' => 'string' ),
+					),
+				),
+			)
+		);
+
+		register_rest_route(
+			APPZA_CORE_REST_NAMESPACE,
+			'/core-connection',
+			array(
+				array(
+					'methods'             => \WP_REST_Server::READABLE,
+					'callback'            => array( $connection, 'get' ),
+					'permission_callback' => array( $connection, 'permission_check' ),
+				),
+				array(
+					'methods'             => \WP_REST_Server::CREATABLE,
+					'callback'            => array( $connection, 'put' ),
+					'permission_callback' => array( $connection, 'permission_check' ),
+					'args'                => array(
+						'url' => array( 'required' => true, 'type' => 'string' ),
+					),
+				),
+			)
+		);
+
+		register_rest_route(
+			APPZA_CORE_REST_NAMESPACE,
+			'/onboarding/tour-seen',
+			array(
+				'methods'             => \WP_REST_Server::CREATABLE,
+				'callback'            => array( $site_template, 'mark_tour_seen' ),
+				'permission_callback' => array( $site_template, 'permission_check' ),
 			)
 		);
 
