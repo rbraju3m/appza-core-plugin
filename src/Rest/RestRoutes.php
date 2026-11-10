@@ -744,5 +744,26 @@ class RestRoutes {
 				),
 			)
 		);
+
+		// P5: the builder's "Viewing as" switch.
+		$preview_viewer = new PreviewViewerController();
+		register_rest_route(
+			APPZA_CORE_REST_NAMESPACE,
+			'/preview/viewer',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => array( $preview_viewer, 'show' ),
+				'permission_callback' => array( $preview_viewer, 'permission_check' ),
+			)
+		);
+		register_rest_route(
+			APPZA_CORE_REST_NAMESPACE,
+			'/preview/viewer/me',
+			array(
+				'methods'             => \WP_REST_Server::CREATABLE,
+				'callback'            => array( $preview_viewer, 'sign_in_me' ),
+				'permission_callback' => array( $preview_viewer, 'permission_check' ),
+			)
+		);
 	}
 }

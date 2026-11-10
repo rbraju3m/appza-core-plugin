@@ -60,6 +60,10 @@ class AssetLoader {
 						'siteTemplate'             => esc_url_raw( $this->endpoint_url( 'site-template' ) ),
 						'tourSeen'                 => esc_url_raw( $this->endpoint_url( 'onboarding/tour-seen' ) ),
 						'coreConnection'           => esc_url_raw( $this->endpoint_url( 'core-connection' ) ),
+						// P5: the "Viewing as" switch.
+						'previewViewer'            => esc_url_raw( $this->endpoint_url( 'preview/viewer' ) ),
+						'previewViewerMe'          => esc_url_raw( $this->endpoint_url( 'preview/viewer/me' ) ),
+						'appPasswords'             => esc_url_raw( rest_url( 'wp/v2/users/me/application-passwords' ) ),
 						'syncPage'                 => esc_url_raw( admin_url( 'admin.php?page=' . AdminMenu::SLUG_SYNC ) ),
 					),
 					'restNonce'       => wp_create_nonce( 'wp_rest' ),

@@ -7,6 +7,7 @@
 namespace AppzaCore\Plugin\Rest;
 
 use AppzaCore\Plugin\Repository\CatalogSnapshotRepository;
+use AppzaCore\Plugin\Services\PreviewMember;
 
 if ( ! defined( 'WPINC' ) ) {
 	die;
@@ -25,7 +26,31 @@ class PreviewProxyController {
 	/** @var FluentCommunityDocumentsController|null */
 	protected $documents = null;
 
+	/**
+	 * "Viewing as: Member" (P5): a site admin's builder reads as the sample member. Only this read route honours
+	 * it, so nothing is ever written as that account; the user is put back before the response leaves.
+	 */
 	public function handle( \WP_REST_Request $request ) {
+		$switched_from = null;
+		if ( PreviewMember::requested( $request ) ) {
+			$member = PreviewMember::id();
+			if ( $member > 0 ) {
+				$switched_from = get_current_user_id();
+				wp_set_current_user( $member );
+				PreviewMember::refresh_fc_current();
+			}
+		}
+		try {
+			return $this->read( $request );
+		} finally {
+			if ( null !== $switched_from ) {
+				wp_set_current_user( $switched_from );
+				PreviewMember::refresh_fc_current();
+			}
+		}
+	}
+
+	protected function read( \WP_REST_Request $request ) {
 		$ds_slug      = sanitize_title( (string) $request->get_param( 'ds' ) );
 		$params_json  = (string) $request->get_param( 'params' );
 		$template_slug = sanitize_title( (string) $request->get_param( 'template' ) ) ?: 'fluent-community-default';
