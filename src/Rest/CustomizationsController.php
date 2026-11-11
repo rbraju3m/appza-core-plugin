@@ -50,6 +50,33 @@ class CustomizationsController {
 		$target_column         = (string) $request->get_param( 'target_column' );
 		$override_value        = $request->get_param( 'override_value' );
 
+		$target = $this->validate_target( $scope, $target_slug, $target_slug_composite, $target_column );
+		if ( is_wp_error( $target ) ) {
+			return $target;
+		}
+		list( $target_slug, $target_slug_composite ) = $target;
+
+		$id = $this->repo->upsert( $scope, $target_slug, $target_slug_composite, $target_column, $override_value );
+
+		return rest_ensure_response( array(
+			'id'                    => $id,
+			'scope'                 => $scope,
+			'target_slug'           => $target_slug,
+			'target_slug_composite' => $target_slug_composite,
+			'target_column'         => $target_column,
+			'override_value'        => $this->normalize_response_value( $override_value ),
+		) );
+	}
+
+	/**
+	 * The checks a customization's target passes before it is written (also the builder's one Save).
+	 *
+	 * @return array{0: ?string, 1: ?string}|\WP_Error  [target_slug, target_slug_composite], blanks as null.
+	 */
+	public function validate_target( $scope, $target_slug, $target_slug_composite, $target_column ) {
+		$scope         = (string) $scope;
+		$target_column = (string) $target_column;
+
 		if ( ! in_array( $scope, CustomizationSchema::SCOPES, true ) ) {
 			return new \WP_Error(
 				'appza_customizations_invalid_scope',
@@ -87,17 +114,7 @@ class CustomizationsController {
 
 		$target_slug           = ( is_string( $target_slug ) && '' !== $target_slug ) ? $target_slug : null;
 		$target_slug_composite = ( is_string( $target_slug_composite ) && '' !== $target_slug_composite ) ? $target_slug_composite : null;
-
-		$id = $this->repo->upsert( $scope, $target_slug, $target_slug_composite, $target_column, $override_value );
-
-		return rest_ensure_response( array(
-			'id'                    => $id,
-			'scope'                 => $scope,
-			'target_slug'           => $target_slug,
-			'target_slug_composite' => $target_slug_composite,
-			'target_column'         => $target_column,
-			'override_value'        => $this->normalize_response_value( $override_value ),
-		) );
+		return array( $target_slug, $target_slug_composite );
 	}
 
 	public function delete( \WP_REST_Request $request ) {

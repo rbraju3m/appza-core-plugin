@@ -98,9 +98,13 @@ class ScreenLayoutController {
 	}
 
 	protected function resolve( \WP_REST_Request $request ) {
-		$template    = (string) $request->get_param( 'template' );
-		$screen_slug = $request->get_param( 'screen' );
-		$part        = (string) $request->get_param( 'part' );
+		return $this->resolve_target( (string) $request->get_param( 'template' ), $request->get_param( 'screen' ), (string) $request->get_param( 'part' ) );
+	}
+
+	/** A layout resource by its parts; a null screen is the template's chrome. Also used by the builder's one Save. */
+	public function resolve_target( $template, $screen_slug, $part ) {
+		$template    = (string) $template;
+		$part        = (string) $part;
 		$is_screen   = null !== $screen_slug;
 		$parts       = $is_screen ? ScreenLayout::SCREEN_PARTS : ScreenLayout::CHROME_PARTS;
 

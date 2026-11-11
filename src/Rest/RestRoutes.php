@@ -19,6 +19,7 @@ class RestRoutes {
 		$build_requests = new BuildRequestsController();
 		$space_config   = new SpaceConfigController();
 		$screen_layout  = new ScreenLayoutController();
+		$builder_save   = new BuilderSaveController();
 		$design_index   = new DesignIndexController();
 		$site_template  = new SiteTemplateController();
 		$connection     = new CoreConnectionController();
@@ -212,6 +213,17 @@ class RestRoutes {
 			APPZA_CORE_REST_NAMESPACE,
 			'/chrome-layout/(?P<template>[a-z0-9-]+)/(?P<part>[a-z-]+)',
 			$layout_methods
+		);
+
+		// One Save for everything the builder changed (Friendly v2 P3); the single endpoints above stay.
+		register_rest_route(
+			APPZA_CORE_REST_NAMESPACE,
+			'/builder/save',
+			array(
+				'methods'             => \WP_REST_Server::CREATABLE,
+				'callback'            => array( $builder_save, 'save' ),
+				'permission_callback' => array( $builder_save, 'permission_check' ),
+			)
 		);
 
 		register_rest_route(
