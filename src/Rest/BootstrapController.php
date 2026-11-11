@@ -1,6 +1,6 @@
 <?php
 /**
- * GET /wp-json/appza/v1/bootstrap?template=<slug> — public-read, cached per template.
+ * GET /wp-json/appza/v1/bootstrap[?template=<slug>] — public-read, cached per template; no slug = the site's look.
  * Never resolve per-viewer settings here: the answer would be whoever warmed the cache.
  */
 
@@ -31,10 +31,10 @@ class BootstrapController {
 	}
 
 	public function handle( \WP_REST_Request $request ) {
+		// No template: the look the site chose (the demo app connects without knowing it).
 		$template_slug = (string) $request->get_param( 'template' );
-
 		if ( '' === $template_slug ) {
-			return new \WP_Error( 'appza_bootstrap_missing_template', __( 'template query parameter is required', 'appza-core' ), array( 'status' => 400 ) );
+			$template_slug = SiteTemplateController::resolve( $this->snapshots );
 		}
 
 		$snapshot = $this->snapshots->find_by_template_slug( $template_slug );

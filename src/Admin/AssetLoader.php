@@ -59,6 +59,7 @@ class AssetLoader {
 						'buildRequests'            => esc_url_raw( $this->endpoint_url( 'build-requests' ) ),
 						'siteTemplate'             => esc_url_raw( $this->endpoint_url( 'site-template' ) ),
 						'tourSeen'                 => esc_url_raw( $this->endpoint_url( 'onboarding/tour-seen' ) ),
+						'introHidden'              => esc_url_raw( $this->endpoint_url( 'onboarding/intro-hidden' ) ),
 						'coreConnection'           => esc_url_raw( $this->endpoint_url( 'core-connection' ) ),
 						// P5: the "Viewing as" switch.
 						'previewViewer'            => esc_url_raw( $this->endpoint_url( 'preview/viewer' ) ),
@@ -71,6 +72,12 @@ class AssetLoader {
 					'defaultTemplate' => \AppzaCore\Plugin\Rest\SiteTemplateController::resolve(),
 					'templateSaved'   => '' !== \AppzaCore\Plugin\Rest\SiteTemplateController::saved(),
 					'tourSeen'        => \AppzaCore\Plugin\Rest\SiteTemplateController::tour_seen(),
+					'introHidden'     => \AppzaCore\Plugin\Rest\SiteTemplateController::intro_hidden(),
+					'tutorialVideoUrl' => \AppzaCore\Plugin\Rest\SourceIntegrationsController::tutorial_video_url(),
+					'demoApp'         => array(
+						'playStoreUrl' => \AppzaCore\Plugin\Rest\SourceIntegrationsController::demo_app()['play_store_url'],
+						'appStoreUrl'  => \AppzaCore\Plugin\Rest\SourceIntegrationsController::demo_app()['app_store_url'],
+					),
 					'assetsBase'      => esc_url_raw( $base_url ),
 					'siteUrl'         => esc_url_raw( get_site_url() ),
 				)

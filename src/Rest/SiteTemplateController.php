@@ -19,6 +19,7 @@ class SiteTemplateController {
 
 	const OPTION_KEY        = 'appza_core_site_template';
 	const TOUR_META_KEY     = 'appza_core_tour_seen';
+	const INTRO_META_KEY    = 'appza_core_intro_hidden';
 	const FALLBACK_TEMPLATE = 'fluent-community-default';
 
 	protected $core;
@@ -107,6 +108,22 @@ class SiteTemplateController {
 			'saved'    => true,
 			'synced'   => null !== $this->snapshots->find_by_template_slug( $slug ),
 		) );
+	}
+
+	/** "Don't show this again" on the builder's opening modal, per WordPress user (P1e). */
+	public static function intro_hidden( $user_id = 0 ) {
+		$user_id = $user_id ?: get_current_user_id();
+		return $user_id ? (bool) get_user_meta( $user_id, self::INTRO_META_KEY, true ) : false;
+	}
+
+	public function set_intro_hidden( \WP_REST_Request $request ) {
+		$hidden = rest_sanitize_boolean( $request->get_param( 'hidden' ) );
+		if ( $hidden ) {
+			update_user_meta( get_current_user_id(), self::INTRO_META_KEY, 1 );
+		} else {
+			delete_user_meta( get_current_user_id(), self::INTRO_META_KEY );
+		}
+		return rest_ensure_response( array( 'intro_hidden' => $hidden ) );
 	}
 
 	public function mark_tour_seen( \WP_REST_Request $request ) {

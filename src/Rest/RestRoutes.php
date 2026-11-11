@@ -116,6 +116,19 @@ class RestRoutes {
 
 		register_rest_route(
 			APPZA_CORE_REST_NAMESPACE,
+			'/onboarding/intro-hidden',
+			array(
+				'methods'             => \WP_REST_Server::CREATABLE,
+				'callback'            => array( $site_template, 'set_intro_hidden' ),
+				'permission_callback' => array( $site_template, 'permission_check' ),
+				'args'                => array(
+					'hidden' => array( 'required' => true, 'type' => 'boolean' ),
+				),
+			)
+		);
+
+		register_rest_route(
+			APPZA_CORE_REST_NAMESPACE,
 			'/design-index',
 			array(
 				'methods'             => \WP_REST_Server::READABLE,
@@ -140,7 +153,7 @@ class RestRoutes {
 				'permission_callback' => '__return_true',
 				'args'                => array(
 					'template' => array(
-						'required'          => true,
+						'required'          => false,
 						'type'              => 'string',
 						'sanitize_callback' => 'sanitize_title',
 					),

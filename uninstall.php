@@ -28,6 +28,8 @@ $options = array(
 	'appza_core_build_token',
 	'appza_build_requests_log',
 	'appza_core_site_template',
+	'appza_core_tutorial_video_url',
+	'appza_core_demo_app',
 );
 
 foreach ( $options as $option ) {
@@ -35,6 +37,7 @@ foreach ( $options as $option ) {
 }
 
 delete_metadata( 'user', 0, 'appza_core_tour_seen', '', true );
+delete_metadata( 'user', 0, 'appza_core_intro_hidden', '', true );
 
 $wpdb->query(
 	"DELETE FROM {$wpdb->options}
