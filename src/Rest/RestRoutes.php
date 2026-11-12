@@ -23,6 +23,7 @@ class RestRoutes {
 		$design_index   = new DesignIndexController();
 		$site_template  = new SiteTemplateController();
 		$connection     = new CoreConnectionController();
+		$app_identity   = new AppIdentityController();
 
 		register_rest_route(
 			APPZA_CORE_REST_NAMESPACE,
@@ -236,6 +237,24 @@ class RestRoutes {
 				'methods'             => \WP_REST_Server::CREATABLE,
 				'callback'            => array( $builder_save, 'save' ),
 				'permission_callback' => array( $builder_save, 'permission_check' ),
+			)
+		);
+
+		// v1 parity P1c: the app's name, icon and splash.
+		register_rest_route(
+			APPZA_CORE_REST_NAMESPACE,
+			'/app-identity',
+			array(
+				array(
+					'methods'             => \WP_REST_Server::READABLE,
+					'callback'            => array( $app_identity, 'get' ),
+					'permission_callback' => array( $app_identity, 'permission_check' ),
+				),
+				array(
+					'methods'             => \WP_REST_Server::CREATABLE,
+					'callback'            => array( $app_identity, 'save' ),
+					'permission_callback' => array( $app_identity, 'permission_check' ),
+				),
 			)
 		);
 

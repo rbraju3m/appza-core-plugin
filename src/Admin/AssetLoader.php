@@ -33,6 +33,9 @@ class AssetLoader {
 
 		$base_url = APPZA_CORE_PLUGIN_URL . 'assets/admin/';
 
+		// P1c: the icon and splash are picked from the media library.
+		wp_enqueue_media();
+
 		if ( ! empty( $entry['file'] ) ) {
 			// No ?ver: Ionic's lazy chunks import this file by its bare name, and a second URL makes the browser run the
 			// whole builder twice (a second mount that wipes the first-run tour). The hashed filename busts the cache.
@@ -61,6 +64,7 @@ class AssetLoader {
 						'tourSeen'                 => esc_url_raw( $this->endpoint_url( 'onboarding/tour-seen' ) ),
 						'introHidden'              => esc_url_raw( $this->endpoint_url( 'onboarding/intro-hidden' ) ),
 						'coreConnection'           => esc_url_raw( $this->endpoint_url( 'core-connection' ) ),
+						'appIdentity'              => esc_url_raw( $this->endpoint_url( 'app-identity' ) ),
 						// P5: the "Viewing as" switch.
 						'previewViewer'            => esc_url_raw( $this->endpoint_url( 'preview/viewer' ) ),
 						'previewViewerMe'          => esc_url_raw( $this->endpoint_url( 'preview/viewer/me' ) ),
@@ -78,6 +82,8 @@ class AssetLoader {
 						'playStoreUrl' => \AppzaCore\Plugin\Rest\SourceIntegrationsController::demo_app()['play_store_url'],
 						'appStoreUrl'  => \AppzaCore\Plugin\Rest\SourceIntegrationsController::demo_app()['app_store_url'],
 					),
+					// P1c: the app's name, icon and splash (saved now, used by the customer's own builds).
+					'appIdentity'     => \AppzaCore\Plugin\Rest\AppIdentityController::current(),
 					'assetsBase'      => esc_url_raw( $base_url ),
 					'siteUrl'         => esc_url_raw( get_site_url() ),
 				)

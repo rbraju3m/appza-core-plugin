@@ -30,6 +30,7 @@ $options = array(
 	'appza_core_site_template',
 	'appza_core_tutorial_video_url',
 	'appza_core_demo_app',
+	'appza_core_app_identity', // P1c; the icon and splash stay in the media library.
 );
 
 foreach ( $options as $option ) {

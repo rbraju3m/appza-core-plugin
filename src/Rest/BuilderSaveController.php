@@ -6,7 +6,8 @@
  *   POST /builder/save
  *   {
  *     layouts:        [{template, screen|null, part, items, base_version} | {…, remove: true}],
- *     customizations: [{scope, target_slug, target_slug_composite?, target_column, override_value} | {…, remove: true}]
+ *     customizations: [{scope, target_slug, target_slug_composite?, target_column, override_value} | {…, remove: true}],
+ *     identity?:      {name, icon_id, splash_id, splash_background}   (v1 parity P1c)
  *   }
  *
  * Every item is checked first (422, naming each bad one); then the writes run in a transaction, and a
@@ -49,6 +50,14 @@ class BuilderSaveController {
 		list( $layout_ops, $errors ) = $this->check_layouts( array_values( $layouts ) );
 		list( $custom_ops, $more )   = $this->check_customizations( array_values( $customizations ) );
 		$errors                      = array_merge( $errors, $more );
+		// v1 parity P1c: the app's name, icon and splash, when the builder changed them.
+		$identity = $request->get_param( 'identity' );
+		if ( null !== $identity ) {
+			list( $identity, $identity_errors ) = AppIdentityController::check( $identity );
+			foreach ( $identity_errors as $field => $message ) {
+				$errors[ "identity.{$field}" ] = $message;
+			}
+		}
 		if ( $errors ) {
 			return $this->invalid( $errors );
 		}
@@ -94,6 +103,9 @@ class BuilderSaveController {
 				break;
 			}
 		}
+		if ( ! isset( $failed ) && null !== $identity && ! AppIdentityController::write( $identity ) ) {
+			$failed = 'identity';
+		}
 		if ( isset( $failed ) || '' !== $wpdb->last_error ) {
 			$wpdb->query( 'ROLLBACK' );
 			return new \WP_Error(
@@ -106,7 +118,7 @@ class BuilderSaveController {
 		$wpdb->query( 'COMMIT' );
 		return rest_ensure_response( array(
 			'layouts' => $versions,
-			'saved'   => count( $layout_ops ) + count( $custom_ops ),
+			'saved'   => count( $layout_ops ) + count( $custom_ops ) + ( null === $identity ? 0 : 1 ),
 		) );
 	}
 
