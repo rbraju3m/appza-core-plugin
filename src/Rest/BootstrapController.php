@@ -118,6 +118,8 @@ class BootstrapController {
 			'locale_default'          => get_locale(),
 			'auth'                    => null,
 			'fluent_community'        => $this->fluent_community_settings(),
+			// v1 parity P2b: whether the app may offer "Create account" (a piece can hide on site.signup_open).
+			'signup'                  => \AppzaCore\Plugin\Services\SignupService::state(),
 		);
 	}
 

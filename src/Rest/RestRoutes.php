@@ -258,6 +258,54 @@ class RestRoutes {
 			)
 		);
 
+		// v1 parity P2: accounts from the app. Public; each route sets its own limits.
+		$account = new AccountController();
+		register_rest_route(
+			APPZA_CORE_REST_NAMESPACE,
+			'/account/forgot-password',
+			array(
+				'methods'             => \WP_REST_Server::CREATABLE,
+				'callback'            => array( $account, 'forgot_password' ),
+				'permission_callback' => '__return_true',
+				'args'                => array(
+					'login' => array( 'required' => true, 'type' => 'string' ),
+				),
+			)
+		);
+
+		register_rest_route(
+			APPZA_CORE_REST_NAMESPACE,
+			'/account/signup',
+			array(
+				'methods'             => \WP_REST_Server::READABLE,
+				'callback'            => array( $account, 'signup_form' ),
+				'permission_callback' => '__return_true',
+			)
+		);
+		register_rest_route(
+			APPZA_CORE_REST_NAMESPACE,
+			'/account/register',
+			array(
+				'methods'             => \WP_REST_Server::CREATABLE,
+				'callback'            => array( $account, 'register' ),
+				'permission_callback' => '__return_true',
+			)
+		);
+
+		register_rest_route(
+			APPZA_CORE_REST_NAMESPACE,
+			'/account/delete',
+			array(
+				'methods'             => \WP_REST_Server::CREATABLE,
+				'callback'            => array( $account, 'delete_account' ),
+				// The callback answers a signed-out caller itself, with a sentence the app can show.
+				'permission_callback' => '__return_true',
+				'args'                => array(
+					'password' => array( 'required' => true, 'type' => 'string' ),
+				),
+			)
+		);
+
 		register_rest_route(
 			APPZA_CORE_REST_NAMESPACE,
 			'/sync-from-core',
